@@ -1,0 +1,10 @@
+name = "asset-portal"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Secrets/vars are NOT stored here. Set them after deploy:
+#   wrangler secret put GH_TOKEN
+#   wrangler secret put GH_REPO
+#   wrangler secret put SUBMIT_KEY
+#   wrangler secret put ALLOWED_ORIGIN
+# (or add them in the Cloudflare dashboard: Workers > asset-portal > Settings > Variables)

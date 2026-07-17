@@ -416,7 +416,8 @@ function bind(){
       toast("Tracker created for "+p.reqNumber);
       $("#newPanel").classList.remove("show"); STATE.pendingParse=null; $("#reqFile").value=""; renderPreview();
       STATE.state="open"; $("#segActive").setAttribute("aria-selected","true"); $("#segDone").setAttribute("aria-selected","false");
-      await loadTrackers(); render();
+      if(res.tracker){ STATE.trackers.unshift(res.tracker); }  // show immediately (GET is cached ~60s)
+      render();
     } else toast("Create failed: "+(res.error||""));
   });
   $("#q").addEventListener("input", render);

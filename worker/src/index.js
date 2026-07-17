@@ -170,7 +170,7 @@ async function postReq(req, env, h){
   });
   if (!r.ok) { const t = await r.text(); return json({ error: "github " + r.status, detail: t.slice(0, 300) }, 502, h); }
   const gi = await r.json();
-  return json({ ok: true, issueNumber: gi.number, url: gi.html_url }, 201, h);
+  return json({ ok: true, issueNumber: gi.number, url: gi.html_url, tracker: computeTracker(gi) }, 201, h);
 }
 
 async function getReqs(url, env, h, ctx){

@@ -99,6 +99,23 @@
   .soon-tag{font-family:'Arial Black', Arial, sans-serif;text-transform:uppercase;font-size:11px;letter-spacing:0.04em;
     color:var(--medium-gray);border:1px solid var(--light-gray);border-radius:var(--r-sm);padding:11px 16px;display:inline-block;}
 
+  /* KPI tiles */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;}
+  .kpi{background:var(--white);border:1px solid var(--light-gray);border-radius:var(--r);padding:16px 18px;
+    box-shadow:var(--shadow);display:flex;align-items:center;gap:14px;animation:fadeUp .45s ease both;}
+  .kpi .grow{flex:1;min-width:0;}
+  .kpi .lbl{font-size:10px;font-weight:bold;text-transform:uppercase;letter-spacing:0.09em;color:var(--medium-gray);}
+  .kpi .num{font-family:'Arial Black', Arial, sans-serif;color:var(--dark-blue);font-size:28px;line-height:1;margin:4px 0 8px;}
+  .kpi .sub{font-size:11px;color:var(--medium-gray);}
+  .meter{height:6px;background:var(--bright-gray);border-radius:3px;overflow:hidden;}
+  .meter>span{display:block;height:100%;background:var(--energy-blue);border-radius:3px;width:0;transition:width .9s ease;}
+  .meter.blue>span{background:var(--dark-blue);} .meter.light>span{background:var(--light-blue);}
+  .ring-wrap{position:relative;width:58px;height:58px;flex:0 0 58px;}
+  .ring-wrap .ring-val{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-family:'Arial Black', Arial, sans-serif;font-size:13px;color:var(--dark-blue);}
+  svg.chart.ring{width:58px;height:58px;display:block;}
+  .ring-fg{transition:stroke-dashoffset 1s ease;}
+
   footer{max-width:1160px;width:100%;margin:0 auto;padding:0 32px 40px;color:var(--medium-gray);font-size:11px;}
 
   /* ---------- Responsive ---------- */
@@ -140,7 +157,7 @@
 	<polygon class="st0" points="90.2,64.6 124.9,105.6 313.3,105.7 280.2,287.9 321.4,335.4 368.2,64.7 	"/>
 </g>
 </svg></a>
-    <a class="rail-item active" href="index.html"><span class="rail-ic ic-hub"></span><span class="rail-lbl">Hub</span></a>
+    <a class="rail-item active" href="index.html"><span class="rail-ic ic-hub"></span><span class="rail-lbl">Dashboard</span></a>
     <a class="rail-item" href="inventory.html"><span class="rail-ic ic-assets"></span><span class="rail-lbl">Assets</span></a>
     <a class="rail-item" href="deliveries.html"><span class="rail-ic ic-deliv"></span><span class="rail-lbl">Deliveries</span></a>
     <a class="rail-item" href="admin.html"><span class="rail-ic ic-admin"></span><span class="rail-lbl">Admin</span></a>
@@ -159,11 +176,17 @@
 
     <main>
       <div class="intro">
-        <h2>Tools</h2>
+        <h2>Dashboard</h2>
         <div class="rule"></div>
-        <p>Select a tool below. New tools are added as cards as they come online.</p>
+        <p>At-a-glance status across the site inventory and workflows.</p>
       </div>
 
+      <section class="kpis" id="kpis" aria-label="Key metrics"></section>
+
+      <div class="intro" style="margin-top:34px;">
+        <h2>Tools</h2>
+        <div class="rule"></div>
+      </div>
       <div class="grid" id="grid"></div>
     </main>
 
@@ -222,23 +245,87 @@ function render(){
   }).join("");
 }
 
-/* Show the last-updated date + time in the top bar (static JSON; no Worker needed). */
+/* Last-updated pill (date + time from the build's ISO timestamp). */
 function fmtUpdated(iso){
   if(!iso) return "";
   const date=iso.slice(0,10), time=iso.slice(11,16);
   return '<span class="dot"></span><span><span class="lbl2">Last updated</span><br>' +
     '<span class="val">' + esc(date) + (time?(' &middot; ' + esc(time) + ' UTC'):'') + '</span></span>';
 }
-async function loadMeta(){
-  let meta=null;
+
+/* ---------- Dashboard KPIs ----------
+   Assets/status come from the static data/ files; open requests + active
+   deliveries come from the repo's public GitHub Issues API (read-only, no
+   token, CORS-enabled) — so no Worker call is needed here. */
+const GH_ISSUES = "https://api.github.com/repos/be-apps-tools/1127/issues?state=open&per_page=100";
+function labelsOf(it){ return (it.labels||[]).map(l => typeof l==="string" ? l : (l&&l.name)||""); }
+async function fetchOpenIssues(){
+  const r = await fetch(GH_ISSUES, { headers:{ "Accept":"application/vnd.github+json" } });
+  if(!r.ok) throw new Error("GitHub "+r.status);
+  const a = await r.json();
+  return Array.isArray(a) ? a.filter(it => !it.pull_request) : [];
+}
+function ringSvg(pct){
+  const p=Math.max(0,Math.min(100,pct||0));
+  return '<div class="ring-wrap"><svg class="chart ring" viewBox="0 0 48 48" aria-hidden="true">'+
+    '<circle cx="24" cy="24" r="20" fill="none" stroke="#B9E5FB" stroke-width="5"></circle>'+
+    '<circle class="ring-fg" cx="24" cy="24" r="20" fill="none" stroke="#2DA2DB" stroke-width="5" stroke-linecap="round" '+
+      'stroke-dasharray="125.66" stroke-dashoffset="125.66" data-pct="'+p+'" transform="rotate(-90 24 24)"></circle>'+
+    '</svg><div class="ring-val">'+p+'%</div></div>';
+}
+function meterTile(lbl, num, cls, pct){
+  return '<div class="kpi"><div class="grow"><div class="lbl">'+esc(lbl)+'</div><div class="num">'+esc(num)+'</div>'+
+    '<div class="meter '+cls+'"><span data-w="'+(pct||0)+'"></span></div></div></div>';
+}
+function subTile(lbl, num, sub){
+  return '<div class="kpi"><div class="grow"><div class="lbl">'+esc(lbl)+'</div><div class="num">'+esc(num)+'</div>'+
+    (sub?'<div class="sub">'+esc(sub)+'</div>':'')+'</div></div>';
+}
+async function loadDashboard(){
+  let meta=null, sites=[];
   try{ const r=await fetch("data/meta.json"); if(r.ok) meta=await r.json(); }catch(e){}
-  if(meta && meta.builtAt){
-    const el=$("#asof"); el.innerHTML = fmtUpdated(meta.builtAt); el.classList.add("show");
-  }
+  try{ const r=await fetch("data/sites.json"); if(r.ok) sites=await r.json(); }catch(e){}
+  if(meta && meta.builtAt){ const el=$("#asof"); el.innerHTML=fmtUpdated(meta.builtAt); el.classList.add("show"); }
+
+  let total=0, working=0, attention=0, unassigned=0;
+  try{
+    const per=await Promise.all((sites||[]).map(s=>fetch("data/sites/"+encodeURIComponent(s.code)+".json").then(r=>r.ok?r.json():[]).catch(()=>[])));
+    per.forEach(as=>(as||[]).forEach(a=>{
+      total++; const st=String(a.status||"");
+      if(st.indexOf("WK")===0) working++;
+      else if(st.indexOf("AV")!==0 && st.indexOf("AC")!==0) attention++;
+      if(!String(a.trade||"")) unassigned++;
+    }));
+  }catch(e){}
+  if(!total && meta && meta.assetCount) total=meta.assetCount;
+
+  let openReq=null, activeDeliv=null;
+  try{
+    const arr=await fetchOpenIssues(); openReq=0; activeDeliv=0;
+    arr.forEach(it=>{ const L=labelsOf(it);
+      if(L.includes("req-tracker")) activeDeliv++;
+      else if(L.includes("request:reassign")||L.includes("request:issue")) openReq++;
+    });
+  }catch(e){ /* offline / rate-limited: show em-dash */ }
+
+  const pct = total ? Math.round(100*working/total) : 0;
+  const pctOf = v => total ? Math.round(100*v/total) : 0;
+  const box=$("#kpis");
+  box.innerHTML =
+    '<div class="kpi">'+ringSvg(pct)+'<div class="grow"><div class="lbl">Working</div><div class="num">'+working.toLocaleString()+'</div><div class="sub">of '+total.toLocaleString()+' assets</div></div></div>'+
+    subTile("Assets tracked", total.toLocaleString(), (meta&&meta.sourceVersion)?("Master "+meta.sourceVersion):"")+
+    meterTile("Needs attention", attention.toLocaleString(), "blue", pctOf(attention))+
+    meterTile("Unassigned trade", unassigned.toLocaleString(), "light", pctOf(unassigned))+
+    subTile("Open requests", (openReq==null?"—":String(openReq)), "Trade / issue")+
+    subTile("Active deliveries", (activeDeliv==null?"—":String(activeDeliv)), "In progress");
+  requestAnimationFrame(()=>{
+    box.querySelectorAll(".meter>span").forEach(el=>el.style.width=(Number(el.getAttribute("data-w"))||0)+"%");
+    const fg=box.querySelector(".ring-fg"); if(fg) fg.style.strokeDashoffset=(125.66*(1-pct/100)).toFixed(1);
+  });
 }
 
 render();
-loadMeta();
+loadDashboard();
 </script>
 </body>
 </html>

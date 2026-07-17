@@ -97,6 +97,28 @@
     font-size:11px;letter-spacing:0.04em;color:var(--medium-gray);cursor:pointer;padding:11px 8px;}
   .linkbtn:hover{color:var(--dark-blue);}
 
+  /* Open requests card */
+  .reqcard{background:var(--white);border:1px solid var(--light-gray);border-radius:var(--r);overflow:hidden;
+    box-shadow:var(--shadow);margin-top:24px;animation:fadeUp .5s ease both;}
+  .reqcard .card-head{background:var(--dark-blue);padding:14px 20px;display:flex;align-items:center;gap:12px;}
+  .reqcard .card-head h3{color:var(--white);font-size:15px;}
+  .reqcard .card-head .rq-refresh{margin-left:auto;background:none;border:1px solid var(--energy-blue);color:var(--light-blue);
+    font-family:'Arial Black', Arial, sans-serif;text-transform:uppercase;font-size:10px;letter-spacing:0.04em;
+    border-radius:999px;padding:6px 12px;cursor:pointer;}
+  .reqcard .card-head .rq-refresh:hover{background:var(--energy-blue);color:var(--white);}
+  .reqrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:13px 20px;border-bottom:1px solid var(--bright-gray);font-size:13px;}
+  .reqrow:last-child{border-bottom:none;}
+  .reqrow .rq-main{min-width:0;}
+  .reqrow .rq-main strong{color:var(--dark-blue);}
+  .badge{display:inline-block;background:var(--bright-gray);border:1px solid var(--light-gray);color:var(--dark-blue);
+    border-radius:999px;font-size:10px;font-weight:bold;text-transform:uppercase;letter-spacing:0.04em;padding:3px 10px;white-space:nowrap;}
+  .badge.issue{color:var(--medium-gray);}
+  .muted{color:var(--medium-gray);font-size:12px;}
+  .rq-open{margin-left:auto;font-family:'Arial Black', Arial, sans-serif;text-transform:uppercase;font-size:10px;letter-spacing:0.04em;
+    color:var(--white);background:var(--dark-blue);border-radius:999px;padding:6px 12px;text-decoration:none;white-space:nowrap;}
+  .rq-open:hover{background:var(--energy-blue);}
+  .rq-empty{padding:20px;color:var(--medium-gray);font-size:13px;}
+
   footer{max-width:1160px;width:100%;margin:0 auto;padding:0 32px 40px;color:var(--medium-gray);font-size:11px;}
 
   @media (max-width:820px){
@@ -137,7 +159,7 @@
 	<polygon class="st0" points="90.2,64.6 124.9,105.6 313.3,105.7 280.2,287.9 321.4,335.4 368.2,64.7 	"/>
 </g>
 </svg></a>
-    <a class="rail-item" href="index.html"><span class="rail-ic ic-hub"></span><span class="rail-lbl">Hub</span></a>
+    <a class="rail-item" href="index.html"><span class="rail-ic ic-hub"></span><span class="rail-lbl">Dashboard</span></a>
     <a class="rail-item" href="inventory.html"><span class="rail-ic ic-assets"></span><span class="rail-lbl">Assets</span></a>
     <a class="rail-item" href="deliveries.html"><span class="rail-ic ic-deliv"></span><span class="rail-lbl">Deliveries</span></a>
     <a class="rail-item active" href="admin.html"><span class="rail-ic ic-admin"></span><span class="rail-lbl">Admin</span></a>
@@ -161,6 +183,7 @@
         <p>Sign in once to manage Equipment Master imports and delivery trackers. Your sign-in is shared across the portal on this device.</p>
       </div>
       <div class="grid" id="adminZone"></div>
+      <div id="openReqsWrap"></div>
     </main>
 
     <footer>&copy; 2026 Blattner. Internal tools.</footer>
@@ -184,6 +207,52 @@ function adminSignIn(){
 }
 function adminSignOut(){ localStorage.removeItem("bac_admin_key"); renderAdmin(); }
 
+/* ---------- Open change requests (read-only, from the public GitHub Issues API) ---------- */
+const GH_ISSUES = "https://api.github.com/repos/be-apps-tools/1127/issues?state=open&per_page=100";
+function labelsOf(it){ return (it.labels||[]).map(l => typeof l==="string" ? l : (l&&l.name)||""); }
+function parseMarker(body){ const m=/```json\s*({[\s\S]*?})\s*```/.exec(body||""); if(!m) return null; try{ return JSON.parse(m[1]); }catch(e){ return null; } }
+function field(body,label){ const m=new RegExp("\\*\\*"+label+":\\*\\*\\s*(.*)").exec(body||""); return m?m[1].trim():""; }
+async function fetchOpenIssues(){
+  const r=await fetch(GH_ISSUES,{headers:{"Accept":"application/vnd.github+json"}});
+  if(!r.ok) throw new Error("GitHub "+r.status);
+  const a=await r.json();
+  return Array.isArray(a)?a.filter(it=>!it.pull_request):[];
+}
+async function loadOpenRequests(){
+  const w=$("#openReqsWrap");
+  w.innerHTML='<div class="reqcard"><div class="card-head"><h3>Open change requests</h3></div><div class="rq-empty">Loading…</div></div>';
+  let reqs;
+  try{
+    const arr=await fetchOpenIssues();
+    reqs=arr.filter(it=>{ const L=labelsOf(it); return L.includes("request:reassign")||L.includes("request:issue"); })
+      .map(it=>{ const L=labelsOf(it), m=parseMarker(it.body)||{};
+        const type=L.includes("request:reassign")?"reassign":"issue";
+        return { number:it.number, url:it.html_url, type,
+          unit:m.unit||field(it.body,"Unit"), serial:m.serial||field(it.body,"Serial"),
+          site:m.site||field(it.body,"Site"), requestedTrade:m.requestedTrade||field(it.body,"Requested trade"),
+          current:field(it.body,"Current trade"), requester:field(it.body,"Requester") };
+      });
+  }catch(e){
+    w.innerHTML='<div class="reqcard"><div class="card-head"><h3>Open change requests</h3><button class="rq-refresh" id="rqRefresh">Retry</button></div><div class="rq-empty">Could not load requests ('+esc(e.message)+'). GitHub may be rate-limiting — try again shortly.</div></div>';
+    return;
+  }
+  renderOpenReqs(reqs);
+}
+function renderOpenReqs(reqs){
+  const rows = reqs.length ? reqs.map(r=>{
+    const badge = r.type==="reassign" ? '<span class="badge">Reassign</span>' : '<span class="badge issue">Issue</span>';
+    const change = r.type==="reassign" ? (esc(r.current||"(none)")+' &rarr; '+esc(r.requestedTrade||"?")) : 'Reported issue';
+    const meta = [r.site, r.requester].filter(Boolean).map(esc).join(' &middot; ');
+    return '<div class="reqrow">'+badge+
+      '<span class="rq-main"><strong>Unit '+esc(r.unit||"?")+'</strong> <span class="muted">SN '+esc(r.serial||"—")+'</span> &middot; '+change+'</span>'+
+      (meta?'<span class="muted">'+meta+'</span>':'')+
+      '<a class="rq-open" href="'+esc(r.url)+'" target="_blank" rel="noopener">Open #'+esc(r.number)+'</a></div>';
+  }).join("") : '<div class="rq-empty">No open change requests. Nothing to action right now.</div>';
+  $("#openReqsWrap").innerHTML =
+    '<div class="reqcard"><div class="card-head"><h3>Open change requests'+(reqs.length?(' ('+reqs.length+')'):'')+'</h3>'+
+      '<button class="rq-refresh" id="rqRefresh">Refresh</button></div>'+rows+'</div>';
+}
+
 function renderAdmin(){
   const z=$("#adminZone"), who=$("#who");
   if(adminKey()){
@@ -204,6 +273,7 @@ function renderAdmin(){
           '<div class="eyebrow">Session</div><h3>Signed in</h3>' +
           '<p>' + esc(adminName()||"admin") + ' — signed in on this device. Sign out to require the admin key again.</p></div>' +
         '<div class="foot"><button class="linkbtn" id="adminSignOut">Sign out</button></div></div>';
+    loadOpenRequests();
   } else {
     who.classList.remove("show"); who.textContent="";
     z.innerHTML =
@@ -212,12 +282,14 @@ function renderAdmin(){
           '<div class="eyebrow">Restricted</div><h3>Admin sign in</h3>' +
           '<p>Enter the admin key to manage Equipment Master imports and delivery trackers.</p></div>' +
         '<div class="foot"><button class="open-btn" id="adminSignIn">Sign in</button></div></div>';
+    $("#openReqsWrap").innerHTML="";
   }
 }
 $("#adminZone").addEventListener("click", e=>{
   if(e.target.closest("#adminSignIn")) adminSignIn();
   else if(e.target.closest("#adminSignOut")) adminSignOut();
 });
+$("#openReqsWrap").addEventListener("click", e=>{ if(e.target.closest("#rqRefresh")) loadOpenRequests(); });
 renderAdmin();
 </script>
 </body>

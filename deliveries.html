@@ -462,6 +462,12 @@ async function logEvent(issue, line, kind, qty, by){
   if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
   return await r.json();
 }
+async function deleteReq(issue){
+  const r=await fetch(wbase()+"/req/delete",{method:"POST",headers:{"Content-Type":"application/json","x-admin-key":adminKey()},
+    body:JSON.stringify({issue})});
+  if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
+  return await r.json();
+}
 function lineDelivered(l){ return (l.deliveries||[]).reduce((s,d)=>s+(Number(d.qty)||0),0); }
 function linePickedUp(l){ return (l.pickups||[]).reduce((s,p)=>s+(Number(p.qty)||0),0); }
 function lineStatus(delivered, picked){
@@ -534,7 +540,9 @@ function renderTracker(t){
       (t.project?'<span class="meta">'+esc(t.project)+'</span>':'')+
       '<span class="prog"><span class="lines">'+t.linesComplete+'/'+t.linesTotal+' picked up</span>'+ringSvg(pct)+'</span></div>'+
     '<div class="detail"><div class="table-scroll"><table><thead><tr><th>Line</th><th>Part #</th><th>Description</th><th>UoM</th><th>Delivered</th><th>Picked up</th><th>Picked up by</th><th>Status</th>'+adminHead+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
-      '<div style="margin-top:8px"><a class="btn small secondary" href="'+esc(t.url)+'" target="_blank" rel="noopener">Open issue</a></div></div></div>';
+      '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;"><a class="btn small secondary" href="'+esc(t.url)+'" target="_blank" rel="noopener">Open issue</a>'+
+      (STATE.admin?'<button class="btn small secondary" data-delete="'+t.issue+'">Delete order</button>':'')+
+      '</div></div></div>';
 }
 
 /* ---------- boot ---------- */
@@ -595,6 +603,16 @@ function bind(){
   $("#segActive").addEventListener("click", async ()=>{ STATE.state="open"; $("#segActive").setAttribute("aria-selected","true"); $("#segDone").setAttribute("aria-selected","false"); await loadTrackers(); render(); });
   $("#segDone").addEventListener("click", async ()=>{ STATE.state="closed"; $("#segDone").setAttribute("aria-selected","true"); $("#segActive").setAttribute("aria-selected","false"); await loadTrackers(); render(); });
   $("#list").addEventListener("click", async e=>{
+    const del=e.target.closest("[data-delete]");
+    if(del){
+      const issue=parseInt(del.getAttribute("data-delete"),10);
+      if(!window.confirm("Delete this tracker? It's removed from the app (the GitHub issue is closed as a record).")) return;
+      try{ toast("Deleting…"); await deleteReq(issue);
+        const idx=STATE.trackers.findIndex(t=>t.issue===issue); if(idx>=0) STATE.trackers.splice(idx,1);
+        toast("Tracker deleted"); render();
+      }catch(err){ toast("Delete failed: "+err.message); }
+      return;
+    }
     const ev=e.target.closest("[data-ev]");
     if(ev){
       const [kind,issue,line]=ev.getAttribute("data-ev").split("|");

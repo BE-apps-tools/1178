@@ -47,8 +47,9 @@ Each line captures two events, which happen at different times:
 
 ## Corrections
 - Logged too much/little? Log an **adjusting** delivery or pickup on that line (a
-  negative quantity subtracts). To remove a whole tracker, delete its **Issue** on
-  GitHub.
+  negative quantity subtracts). To remove a whole tracker, expand it and click
+  **Delete order** (admin) — it leaves the app and its GitHub Issue is closed
+  (labeled `req-deleted`) as a record.
 
 ## Good to know
 - **Data is public** (the repo is public): trackers contain material descriptions,

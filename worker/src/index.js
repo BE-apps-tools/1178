@@ -7,7 +7,8 @@
  * Requisition delivery trackers:
  *   POST /req        -> ADMIN: create a req-tracker Issue from a parsed Req.
  *   GET  /reqs       -> list trackers (?state=open|closed), cached ~60s.
- *   POST /req/deliver-> ADMIN: log a delivery on a line; auto-close at 100%.
+ *   POST /req/deliver-> ADMIN: log a delivered/pickup event on a line.
+ *   POST /req/delete -> ADMIN: remove a tracker (close issue, drop req-tracker label).
  * Equipment Master inventory:
  *   POST /inventory  -> ADMIN: commit browser-parsed inventory JSON to main
  *                       (data/meta.json, data/sites.json, data/sites/<code>.json).
@@ -53,6 +54,8 @@ export default {
       return getReqs(url, env, h, ctx);
     } else if (path === "/req/deliver" && req.method === "POST"){
       return postDeliver(req, env, h);
+    } else if (path === "/req/delete" && req.method === "POST"){
+      return postDeleteReq(req, env, h);
     } else if (path === "/inventory" && req.method === "POST"){
       return postInventory(req, env, h);
     } else if (path === "/health" && req.method === "GET"){
@@ -241,6 +244,26 @@ async function postDeliver(req, env, h){
   if (!pr.ok) { const t = await pr.text(); return json({ error: "github " + pr.status, detail: t.slice(0, 300) }, 502, h); }
   const updated = await pr.json();
   return json({ ok: true, complete, tracker: computeTracker(updated) }, 200, h);
+}
+
+/* ADMIN: delete a tracker — close the issue and drop the req-tracker label so it
+ * leaves the app (the closed issue remains on GitHub as a record). */
+async function postDeleteReq(req, env, h){
+  if (!requireAdmin(req, env)) return json({ error: "admin only" }, 401, h);
+  let b; try { b = await req.json(); } catch { return json({ error: "bad json" }, 400, h); }
+  const issue = parseInt(b.issue, 10);
+  if (!issue) return json({ error: "missing issue" }, 400, h);
+  const gr = await fetch(`https://api.github.com/repos/${env.GH_REPO}/issues/${issue}`, { headers: ghHeaders(env) });
+  if (!gr.ok) return json({ error: "github " + gr.status }, 502, h);
+  const it = await gr.json();
+  const labels = (it.labels || []).map(l => (typeof l === "string" ? l : l.name)).filter(n => n && n !== "req-tracker");
+  if (!labels.includes("req-deleted")) labels.push("req-deleted");
+  const pr = await fetch(`https://api.github.com/repos/${env.GH_REPO}/issues/${issue}`, {
+    method: "PATCH", headers: { ...ghHeaders(env), "Content-Type": "application/json" },
+    body: JSON.stringify({ state: "closed", state_reason: "not_planned", labels }),
+  });
+  if (!pr.ok) { const t = await pr.text(); return json({ error: "github " + pr.status, detail: t.slice(0, 300) }, 502, h); }
+  return json({ ok: true, deleted: issue }, 200, h);
 }
 
 /* ============================ inventory publish (Equipment Master import) ============================ */

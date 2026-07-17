@@ -3,8 +3,9 @@
 
 Verifies: no rgba()/rgb(), no gradients, no external font imports, Arial-only
 font stacks, every hex on-palette (after stripping the inlined logo <svg>),
-exactly one inlined <svg>, and that the inlined <svg> hash-matches the official
-Blattner Burst-B white logo asset.
+exactly one inlined logo <svg> that hash-matches the official Blattner Burst-B
+white logo asset, and that any additional inlined <svg> is a chart element
+(carries class="chart") whose colors are still palette-checked.
 
 Usage: py scripts/brandcheck.py index.html /path/to/Blattner_B_Burst_B_-_White.svg
 """
@@ -16,6 +17,9 @@ FONT_OK = re.compile(r"^(?:'Arial Black', Arial, sans-serif|Arial, Helvetica, sa
 
 def fail(msg):
     print("BRAND FAIL:", msg); sys.exit(1)
+
+def sig(svg_text):
+    return hashlib.sha256(re.sub(r"\s+", "", svg_text).encode()).hexdigest()
 
 def main():
     html_path, logo_path = sys.argv[1], sys.argv[2]
@@ -31,22 +35,31 @@ def main():
             fail(f"non-Arial font-family: {f!r}")
     print("fonts:", fonts)
 
-    svgs = re.findall(r"<svg.*?</svg>", src, flags=re.DOTALL)
-    if len(svgs) != 1: fail(f"expected exactly 1 inlined <svg>, found {len(svgs)}")
+    # Load the official logo signature.
+    logo_src = open(logo_path, encoding="utf-8").read()
+    logo_svg = re.search(r"<svg.*?</svg>", logo_src, flags=re.DOTALL).group(0)
+    logo_sig = sig(logo_svg)
 
-    stripped = re.sub(r"<svg.*?</svg>", "", src, flags=re.DOTALL)
+    # Classify every inlined svg: exactly one must be the logo; the rest must be
+    # explicitly-tagged chart elements (class="chart").
+    svgs = re.findall(r"<svg.*?</svg>", src, flags=re.DOTALL)
+    logo_svgs = [s for s in svgs if sig(s) == logo_sig]
+    other_svgs = [s for s in svgs if sig(s) != logo_sig]
+    if len(logo_svgs) != 1:
+        fail(f"expected exactly 1 logo <svg> (hash-matched), found {len(logo_svgs)}")
+    for s in other_svgs:
+        if not re.search(r'class="[^"]*\bchart\b[^"]*"', s):
+            fail('non-logo <svg> must carry class="chart" (chart/meter elements only)')
+    print(f"logo hash-match: OK ({len(other_svgs)} chart svg(s) allowed)")
+
+    # Strip only the logo svg for the palette check, so chart-svg colors are
+    # still validated against the palette.
+    stripped = src.replace(logo_svgs[0], "", 1)
     hexes = sorted({h.upper() for h in re.findall(r"#[0-9A-Fa-f]{3,8}", stripped)})
     bad = [h for h in hexes if h not in ALLOWED]
     print("hex (post-strip):", hexes)
     if bad: fail(f"off-palette hex: {bad}")
 
-    def sig(svg_text):
-        return hashlib.sha256(re.sub(r"\s+", "", svg_text).encode()).hexdigest()
-    logo_src = open(logo_path, encoding="utf-8").read()
-    logo_svg = re.search(r"<svg.*?</svg>", logo_src, flags=re.DOTALL).group(0)
-    if sig(svgs[0]) != sig(logo_svg):
-        fail("inlined logo does not hash-match the official asset")
-    print("logo hash-match: OK")
     print("BRAND OK")
 
 if __name__ == "__main__":

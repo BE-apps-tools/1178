@@ -452,7 +452,8 @@ function viewAssets(){
   const q=$("#q").value.trim().toLowerCase();
   const tf=$("#fTrade").value, sf=$("#fStatus").value;
   let v=STATE.assets.slice();
-  if(tf) v=v.filter(a=>a.trade===tf);
+  if(tf===TRADE_NONE) v=v.filter(a=>!String(a.trade||"").trim());
+  else if(tf) v=v.filter(a=>a.trade===tf);
   if(sf) v=v.filter(a=>a.status===sf);
   if(q) v=v.filter(a=>[a.unit,a.serial,a.description,a.description2].some(x=>String(x||"").toLowerCase().includes(q)));
   v.sort((a,b)=>String(a.unit).localeCompare(String(b.unit)));
@@ -800,8 +801,10 @@ async function publishInventory(){
 }
 
 /* ---------- boot ---------- */
+const TRADE_NONE = "__none__";   // filter sentinel for assets with no trade assigned
 function fillTradeControls(){
   const f=$("#fTrade"), r=$("#reqTrade");
+  const un=document.createElement("option"); un.value=TRADE_NONE; un.textContent="Unassigned"; f.appendChild(un);
   TRADES.forEach(t=>{ const o=document.createElement("option"); o.value=t; o.textContent=t; f.appendChild(o);
     const o2=document.createElement("option"); o2.value=t; o2.textContent=t; r.appendChild(o2); });
 }

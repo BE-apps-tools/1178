@@ -298,6 +298,18 @@ function sheetRows(xml, shared){
   }
   return rows;
 }
+/* ---------- Which tabs the Req parser reads ----------
+   Change these two names to point the parser at different sheets.
+   Matching is trimmed + case-insensitive; a missing tab raises a clear error. */
+const REQ_CONTACT_TAB = "Contact & Delivery Information";  // header fields
+const REQ_LINES_TAB   = "JDE Import";                      // line items
+function resolveSheet(sheetPath, wanted){
+  if(sheetPath[wanted]) return sheetPath[wanted];
+  const want=wanted.trim().toLowerCase();
+  const key=Object.keys(sheetPath).find(k=>k.trim().toLowerCase()===want);
+  if(key) return sheetPath[key];
+  throw new Error('Tab "'+wanted+'" not found. Tabs in this file: '+(Object.keys(sheetPath).join(", ")||"(none)"));
+}
 async function parseReqXlsx(file){
   const zip=readXlsxIndex(await file.arrayBuffer());
   const wb=await zip.get("xl/workbook.xml");
@@ -310,8 +322,8 @@ async function parseReqXlsx(file){
     let t=relMap[m[2]]||""; if(t && !t.startsWith("xl/")) t="xl/"+t;
     sheetPath[decodeXml(m[1])]=t;
   }
-  const contact=sheetRows(await zip.get(sheetPath["Contact & Delivery Information"])||"", shared);
-  const jde=sheetRows(await zip.get(sheetPath["JDE Import"])||"", shared);
+  const contact=sheetRows(await zip.get(resolveSheet(sheetPath, REQ_CONTACT_TAB))||"", shared);
+  const jde=sheetRows(await zip.get(resolveSheet(sheetPath, REQ_LINES_TAB))||"", shared);
   return { header:extractHeader(contact), lines:extractLines(jde) };
 }
 function extractHeader(rows){

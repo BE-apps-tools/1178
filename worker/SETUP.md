@@ -51,6 +51,29 @@ Open the portal, submit a Reassign request, and confirm a new Issue appears in
 `AsSet-Capture-BEI` labeled `request:reassign`. The pending badge should show on
 that asset within ~60s (the Worker caches `GET /requests`).
 
+## 5. Enable browser inventory import (Equipment Master → `/inventory`)
+
+The portal can publish a fresh Equipment Master straight from the browser (admin
+uploads the `.xlsx`, it's parsed client-side, and the built JSON is committed by the
+Worker). This adds the **`POST /inventory`** route, which **writes files to the repo**
+— so the token needs one more permission than the request routes:
+
+1. **Add Contents: Read+write to `GH_TOKEN`.** Edit the fine-grained token (§1) and add
+   **Permissions → Repository → Contents: Read and write** (keep Issues: Read+write).
+   Re-copy the token and update the secret: `wrangler secret put GH_TOKEN` (or update it
+   in the dashboard). No new secret is needed — `/inventory` is gated by the existing
+   `ADMIN_KEY`.
+2. **Deploy the Worker code** that includes the `/inventory` route (`wrangler deploy`, or
+   reconnect Cloudflare Build to the org repo). Until it's deployed, the portal's
+   **Publish inventory** button returns an error.
+3. **Test:** in Asset Inventory → **Admin** → **Import Equipment Master**, upload the
+   xlsx, confirm the preview counts, **Publish**. `main` gets a
+   `Update inventory data … [portal]` commit and the site refreshes in ~1–2 min.
+
+`/inventory` commits `data/meta.json`, `data/sites.json`, and `data/sites/<code>.json`
+in a single atomic commit (GitHub Git Data API), deleting per-site files no longer
+present — the same result as the `build-data` Action.
+
 ## Optional hardening
 
 The endpoint is public (protected by origin + submit-key). For more, add

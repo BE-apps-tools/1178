@@ -64,6 +64,7 @@
   .subbar{background:var(--white);border-bottom:1px solid var(--light-gray);padding:14px 32px;
     display:flex;flex-wrap:wrap;gap:14px;align-items:center;}
   .subbar label{font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.06em;color:var(--medium-gray);}
+  .subbar .who{font-size:11px;color:var(--medium-gray);font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;}
   .subbar .count{margin-left:auto;font-size:12px;color:var(--medium-gray);font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;}
 
   /* Banner */
@@ -104,7 +105,7 @@
   /* Toolbar */
   .toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:16px;}
   .toolbar .search{flex:1 1 220px;min-width:0;}
-  input[type=text],select,textarea{width:100%;font-family:Arial, Helvetica, sans-serif;font-size:16px;
+  input[type=text],input[type=file],select,textarea{width:100%;font-family:Arial, Helvetica, sans-serif;font-size:16px;
     color:var(--dark-gray);background:var(--white);border:1px solid var(--light-gray);border-radius:var(--r-sm);padding:11px 13px;
     transition:border-color .15s ease,box-shadow .15s ease;}
   select{flex:0 1 auto;min-width:150px;}
@@ -237,6 +238,9 @@
     <div class="subbar">
       <label for="siteSelect">Site</label>
       <select id="siteSelect" style="min-width:240px;"><option value="">Select a site…</option></select>
+      <button class="btn secondary small" id="adminBtn" style="min-height:34px;">Admin</button>
+      <span class="who" id="adminWho" style="display:none;"></span>
+      <button class="btn small" id="importBtn" style="display:none;min-height:34px;">Import Equipment Master</button>
       <span class="count" id="count"></span>
     </div>
 
@@ -249,6 +253,19 @@
     <main>
       <!-- INVENTORY -->
       <section class="panel active" id="panel-inv" role="tabpanel">
+        <div class="card" id="importPanel" style="display:none;margin-bottom:22px;">
+          <div class="card-head"><h2>Import Equipment Master</h2></div>
+          <div class="card-body">
+            <div class="hintbox">Upload the latest <strong>Equipment Master .xlsx</strong>. It is parsed entirely in your browser — the spreadsheet is never uploaded; only the built inventory JSON is published to the site.</div>
+            <div class="field"><label for="emFile">Equipment Master (.xlsx)</label>
+              <input type="file" id="emFile" accept=".xlsx"></div>
+            <div id="emPreview"></div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">
+              <button class="btn" id="emPublish" disabled>Publish inventory</button>
+              <button class="btn secondary" id="emCancel">Cancel</button>
+            </div>
+          </div>
+        </div>
         <section class="inv-stats" id="invStats" style="display:none;" aria-label="Site summary"></section>
         <div class="toolbar">
           <div class="search"><input type="text" id="q" aria-label="Search assets by unit or serial number, or description" placeholder="Search Unit # or Serial # or description…" autocomplete="off"></div>
@@ -344,7 +361,7 @@ const TRADES = ["Civil","Electrical","Foundation","Collection","Install","Mechan
 let WORKER_URL = "https://asset-portal.site-asset-manager.workers.dev";
 let SUBMIT_KEY = "access123!";   // spam deterrent; matches the Worker's SUBMIT_KEY var
 
-const STATE = { site:"", assets:[], meta:null, siteIndex:[] };
+const STATE = { site:"", assets:[], meta:null, siteIndex:[], admin:false, adminName:"", pendingInventory:null };
 let REQ_TARGET = null;
 let OPEN_REQ = {};                    // "unit|serial" -> [ {issue,url,type,requestedTrade} ]
 const rkey = (u,s) => u + "|" + s;
@@ -599,6 +616,193 @@ function switchTab(name){
   if(name==="my") renderMyRequests();
 }
 
+/* ==========================================================================
+   ADMIN + Equipment Master browser import
+   The .xlsx is parsed here (never uploaded); the built JSON is published via
+   the Worker (POST /inventory, ADMIN_KEY). Mirrors build/build_data.py +
+   build/normalize.py so the output matches the Action-built data exactly.
+   ========================================================================== */
+function adminKey(){ return localStorage.getItem("bac_admin_key")||""; }
+function setAdmin(on){
+  STATE.admin=on;
+  $("#adminBtn").style.display=on?"none":"inline-flex";
+  $("#adminWho").style.display=on?"inline":"none";
+  $("#importBtn").style.display=on?"inline-flex":"none";
+  $("#adminWho").textContent=on?("Admin: "+STATE.adminName):"";
+  if(!on){ $("#importPanel").style.display="none"; }
+}
+function adminUnlock(){
+  const name=prompt("Your name (shown on updates):"); if(name===null) return;
+  const key=prompt("Admin key:"); if(key===null) return;
+  STATE.adminName=name.trim()||"admin";
+  localStorage.setItem("bac_admin_name", STATE.adminName);
+  localStorage.setItem("bac_admin_key", key.trim());
+  setAdmin(true); toast("Admin unlocked");
+}
+
+/* ---------- dependency-free xlsx reader (native DecompressionStream) ---------- */
+function emDecodeXml(s){ return String(s).replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&#39;/g,"'"); }
+function emColIndex(ref){ const m=/^([A-Z]+)/.exec(ref); let n=0; for(const ch of m[1]) n=n*26+(ch.charCodeAt(0)-64); return n-1; }
+function emExcelSerialToISO(v){
+  const s=String(v==null?"":v).trim(); if(!s) return "";
+  const n=Math.trunc(Number(s)); if(!isFinite(n)||n<=0) return "";
+  const d=new Date(Date.UTC(1899,11,30)+n*86400000);
+  return isNaN(d)?"":d.toISOString().slice(0,10);
+}
+function emReadXlsx(buf){
+  const dv=new DataView(buf), u8=new Uint8Array(buf), dec=new TextDecoder();
+  let eocd=-1;
+  for(let i=buf.byteLength-22;i>=0;i--){ if(dv.getUint32(i,true)===0x06054b50){ eocd=i; break; } }
+  if(eocd<0) throw new Error("Not a valid .xlsx (no zip end record)");
+  const cdOff=dv.getUint32(eocd+16,true), cdCount=dv.getUint16(eocd+10,true);
+  const entries={}; let p=cdOff;
+  for(let n=0;n<cdCount;n++){
+    if(dv.getUint32(p,true)!==0x02014b50) break;
+    const method=dv.getUint16(p+10,true), compSize=dv.getUint32(p+20,true);
+    const nameLen=dv.getUint16(p+28,true), extraLen=dv.getUint16(p+30,true), cmtLen=dv.getUint16(p+32,true);
+    const localOff=dv.getUint32(p+42,true);
+    const name=dec.decode(u8.subarray(p+46,p+46+nameLen));
+    entries[name]={method,compSize,localOff}; p+=46+nameLen+extraLen+cmtLen;
+  }
+  async function get(name){
+    const e=entries[name]; if(!e) return null;
+    const lNameLen=dv.getUint16(e.localOff+26,true), lExtraLen=dv.getUint16(e.localOff+28,true);
+    const start=e.localOff+30+lNameLen+lExtraLen;
+    const comp=u8.subarray(start,start+e.compSize);
+    if(e.method===0) return dec.decode(comp);
+    if(e.method===8){
+      if(typeof DecompressionStream==="undefined") throw new Error("This browser can't read .xlsx (no DecompressionStream) — use Chrome/Edge or recent Safari.");
+      const ab=await new Response(new Blob([comp]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer();
+      return dec.decode(new Uint8Array(ab));
+    }
+    throw new Error("Unsupported compression in .xlsx (method "+e.method+")");
+  }
+  return { get };
+}
+function emParseShared(xml){
+  if(!xml) return []; const out=[];
+  for(const m of xml.matchAll(/<si>([\s\S]*?)<\/si>/g)){
+    let t=""; for(const tm of m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)) t+=tm[1];
+    out.push(emDecodeXml(t));
+  }
+  return out;
+}
+function emSheetRows(xml, shared){
+  const rows=[];
+  for(const rm of xml.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)){
+    const cells={}; let maxc=0;
+    for(const cm of rm[1].matchAll(/<c\s+r="([A-Z]+\d+)"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)){
+      const ref=cm[1], attrs=cm[2]||"", inner=cm[3]||"";
+      const ci=emColIndex(ref); if(ci>maxc) maxc=ci;
+      const tm=/t="([^"]+)"/.exec(attrs); const ty=tm?tm[1]:""; let val="";
+      if(ty==="inlineStr"){ const im=/<t[^>]*>([\s\S]*?)<\/t>/.exec(inner); val=im?emDecodeXml(im[1]):""; }
+      else { const vm=/<v>([\s\S]*?)<\/v>/.exec(inner); if(vm){ val = ty==="s" ? (shared[parseInt(vm[1],10)]||"") : emDecodeXml(vm[1]); } }
+      cells[ci]=val;
+    }
+    const arr=[]; for(let i=0;i<=maxc;i++) arr.push(cells[i]!==undefined?cells[i]:"");
+    rows.push(arr);
+  }
+  return rows;
+}
+async function emFirstSheetRows(file){
+  const zip=emReadXlsx(await file.arrayBuffer());
+  const wb=await zip.get("xl/workbook.xml");
+  const rels=await zip.get("xl/_rels/workbook.xml.rels");
+  const shared=emParseShared(await zip.get("xl/sharedStrings.xml"));
+  const relMap={};
+  for(const m of rels.matchAll(/<Relationship\s+[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g)) relMap[m[1]]=m[2];
+  const sm=/<sheet\s+[^>]*r:id="([^"]+)"/.exec(wb) || /<sheet\s+[^>]*name="[^"]*"[^>]*r:id="([^"]+)"/.exec(wb);
+  if(!sm) throw new Error("No sheet found in workbook");
+  let t=relMap[sm[1]]||""; if(t && !t.startsWith("xl/")) t="xl/"+t;
+  return emSheetRows(await zip.get(t)||"", shared);
+}
+
+/* ---------- port of build/normalize.py + build/build_data.py ---------- */
+const EM_HEADER_TO_FIELD = {
+  "Unit Number":"unit","Description":"description","Description 2":"description2",
+  "Serial Number":"serial","Mfg":"mfg","Mdl Yr":"modelYear",
+  "Additional Information":"additionalInfo","Equipment Status":"status",
+  "Branch/Plant":"branchPlant","From Date":"fromDate","Transfer Number":"transferNumber",
+  "Additional Remarks":"remarks","Assigned Employee":"assignedEmployee",
+  "Acquired Date":"acquiredDate","Company":"company","Location":"location",
+  "Trade":"trade","Location Code":"locationCode","Finance Method":"financeMethod",
+  "Asset Number":"assetNumber",
+};
+const EM_TRADE_VARIANTS = {
+  "CIVIL":"Civil","ELECTRIC":"Electrical","ELEC":"Electrical","ELECTRI":"Electrical",
+  "ELETRIC":"Electrical","ELECT":"Electrical","ELECTRICAL":"Electrical",
+  "FOUNDAT":"Foundation","FOUNDATION":"Foundation","COLLECT":"Collection","COLLECTI":"Collection",
+  "COLLECTION":"Collection","INSTALL":"Install","MECHANIC":"Mechanical","MECHANICAL":"Mechanical",
+  "COMMISSG":"Commissioning","COMMISSI":"Commissioning","COMMISSIONING":"Commissioning",
+  "SUBSTATN":"Substation","SUBSTATI":"Substation","SUBSTATION":"Substation",
+  "BESS":"BESS","SAFETY":"Safety","SM/PCC":"SM/PCC","SURVEY":"Survey","QUALITY":"Quality",
+  "TLINE":"TLine","INVENTRY":"Inventory","INVENTORY":"Inventory","DECOM":"Decom","LOWER YD":"Other",
+};
+function emCanonicalTrade(raw){ const s=(raw||"").trim(); if(!s) return ""; return EM_TRADE_VARIANTS[s.toUpperCase()]||"Other"; }
+function emSplitBranch(bp){ const s=(bp||"").trim(); const i=s.indexOf(" - "); if(i>=0) return [s.slice(0,i).trim(), s.slice(i+3).trim()]; return s?[s,""]:["",""]; }
+function emSanitizeCode(code){ return String(code||"").replace(/[^A-Za-z0-9_-]+/g,"_") || "UNASSIGNED"; }
+function emNormHeader(s){ return String(s||"").replace(/\s+/g," ").trim(); }
+function buildInventory(rows, fileName){
+  if(!rows.length) throw new Error("Sheet is empty");
+  const header=rows[0].map(emNormHeader);
+  if(!header.includes("Unit Number") && !header.includes("Serial Number"))
+    throw new Error("This doesn't look like an Equipment Master export (no 'Unit Number'/'Serial Number' header). Header found: "+header.filter(Boolean).slice(0,8).join(", "));
+  const sites={}; let count=0;
+  for(let r=1;r<rows.length;r++){
+    const arr=rows[r]; const rec={};
+    header.forEach((h,i)=>{ const f=EM_HEADER_TO_FIELD[h]; if(f) rec[f]=arr[i]!==undefined?arr[i]:""; });
+    const unit=String(rec.unit||"").trim(), serial=String(rec.serial||"").trim();
+    if(!unit && !serial) continue;
+    const rawTrade=String(rec.trade||"").trim();
+    let [codeRaw,name]=emSplitBranch(rec.branchPlant||"");
+    const code=emSanitizeCode(codeRaw);
+    if(!name && code==="UNASSIGNED") name="Unassigned / No Branch";
+    const g=k=>String(rec[k]||"").trim();
+    const asset={ unit, serial, description:g("description"), description2:g("description2"),
+      mfg:g("mfg"), modelYear:g("modelYear"), status:g("status"),
+      trade:emCanonicalTrade(rawTrade), tradeRaw:rawTrade, assignedEmployee:g("assignedEmployee"),
+      location:g("location"), locationCode:g("locationCode"), additionalInfo:g("additionalInfo"),
+      remarks:g("remarks"), company:g("company"), transferNumber:g("transferNumber"),
+      financeMethod:g("financeMethod"), assetNumber:g("assetNumber"),
+      fromDate:emExcelSerialToISO(rec.fromDate||""), acquiredDate:emExcelSerialToISO(rec.acquiredDate||"") };
+    const site=sites[code]||(sites[code]={name,assets:[]}); if(name && !site.name) site.name=name;
+    site.assets.push(asset); count++;
+  }
+  const codes=Object.keys(sites);
+  if(!count) throw new Error("No asset rows found (every row was missing Unit # and Serial #).");
+  const index=codes.map(code=>({code, name:sites[code].name||code, count:sites[code].assets.length}));
+  index.sort((a,b)=>(a.name||a.code).toLowerCase().localeCompare((b.name||b.code).toLowerCase()));
+  const vm=/V\d+\.\d+/.exec(fileName||"");
+  const meta={ builtAt:new Date().toISOString().slice(0,19)+"Z", sourceVersion:vm?vm[0]:"", assetCount:count, siteCount:index.length };
+  const siteData={}; codes.forEach(code=>siteData[code]=sites[code].assets);
+  return { meta, index, siteData };
+}
+
+/* ---------- import UI ---------- */
+function renderEmPreview(){
+  const inv=STATE.pendingInventory, el=$("#emPreview");
+  if(!inv){ el.innerHTML=""; $("#emPublish").disabled=true; return; }
+  const rows=inv.index.slice().sort((a,b)=>b.count-a.count)
+    .map(s=>'<tr><td>'+esc(s.name)+'</td><td>'+esc(s.code)+'</td><td>'+s.count+'</td></tr>').join("");
+  el.innerHTML='<div class="field"><label>Parsed '+inv.meta.assetCount+' assets across '+inv.index.length+' site(s)'+
+    (inv.meta.sourceVersion?(' &middot; '+esc(inv.meta.sourceVersion)):'')+'</label></div>'+
+    '<div class="table-scroll"><table><thead><tr><th>Site</th><th>Code</th><th>Assets</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  $("#emPublish").disabled = inv.meta.assetCount===0;
+}
+async function publishInventory(){
+  const inv=STATE.pendingInventory; if(!inv) return;
+  $("#emPublish").disabled=true; toast("Publishing…");
+  try{
+    const r=await fetch(wbase()+"/inventory",{method:"POST",
+      headers:{"Content-Type":"application/json","x-admin-key":adminKey()}, body:JSON.stringify(inv)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){ toast("Publish failed: "+(d.error||("HTTP "+r.status))); $("#emPublish").disabled=false; return; }
+    toast("Published "+inv.meta.assetCount+" assets — live in ~1–2 min");
+    banner("info","Inventory published ("+inv.meta.assetCount+" assets, "+inv.index.length+" sites). GitHub Pages rebuilds in ~1–2 minutes; refresh then.");
+    STATE.pendingInventory=null; $("#emFile").value=""; renderEmPreview(); $("#importPanel").style.display="none";
+  }catch(err){ toast("Publish failed: "+err.message); $("#emPublish").disabled=false; }
+}
+
 /* ---------- boot ---------- */
 function fillTradeControls(){
   const f=$("#fTrade"), r=$("#reqTrade");
@@ -607,6 +811,15 @@ function fillTradeControls(){
 }
 function bind(){
   document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>switchTab(b.dataset.panel)));
+  $("#adminBtn").addEventListener("click", adminUnlock);
+  $("#importBtn").addEventListener("click", ()=>{ const p=$("#importPanel"); p.style.display = p.style.display==="none"?"block":"none"; });
+  $("#emCancel").addEventListener("click", ()=>{ $("#importPanel").style.display="none"; STATE.pendingInventory=null; $("#emFile").value=""; renderEmPreview(); });
+  $("#emFile").addEventListener("change", async e=>{
+    const f=e.target.files[0]; if(!f) return;
+    try{ toast("Reading file…"); const rows=await emFirstSheetRows(f); STATE.pendingInventory=buildInventory(rows, f.name); renderEmPreview(); toast("Parsed "+STATE.pendingInventory.meta.assetCount+" assets"); }
+    catch(err){ STATE.pendingInventory=null; renderEmPreview(); banner("err","Could not read file: "+err.message); }
+  });
+  $("#emPublish").addEventListener("click", publishInventory);
   $("#siteSelect").addEventListener("change", async e=>{
     const code=e.target.value; STATE.site=code;
     if(!code){ STATE.assets=[]; OPEN_REQ={}; renderStats(); renderInventory(); $("#count").textContent=""; return; }
@@ -643,6 +856,8 @@ function bind(){
 }
 async function init(){
   fillTradeControls(); bind();
+  STATE.adminName = localStorage.getItem("bac_admin_name") || "";
+  setAdmin(!!adminKey());   // restore admin controls if this device has unlocked before
   STATE.meta = await loadMeta();
   if(STATE.meta && STATE.meta.builtAt){ const el=$("#asof"); el.innerHTML = fmtUpdated(STATE.meta.builtAt); el.classList.add("show"); }
   STATE.siteIndex = await loadSiteIndex();

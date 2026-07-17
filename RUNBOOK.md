@@ -63,6 +63,29 @@ On that commit, the **build-data** GitHub Action:
 
 ---
 
+## Alternative: browser import (no git access needed)
+Admins can refresh the inventory straight from the portal instead of committing the
+Excel — handy if you'd rather not touch git.
+
+1. Open **Asset Inventory** → click **Admin** in the site bar → enter your name + the
+   admin key (the same `ADMIN_KEY` used for delivery trackers).
+2. Click **Import Equipment Master** → choose the `Equipment Master*.xlsx`.
+   - The file is parsed **entirely in your browser** — the spreadsheet is never
+     uploaded; only the built JSON leaves your machine. (Trim to your site(s) first,
+     same as step 2 above — the repo is public.)
+3. Review the parsed preview (assets per site), then **Publish inventory**.
+   The Worker commits the refreshed `data/` to `main`; the portal is live within
+   ~1–2 min (same result as the Action-built refresh, minus the file commit).
+
+This path produces byte-identical output to the Action build (it mirrors
+`build/build_data.py` + `build/normalize.py`). It does **not** auto-close reassign
+requests — that still happens on the next Action-built refresh, or make the JDE fix
+and let the daily export handle it.
+
+> **Requires** the Worker's `GH_TOKEN` to have **Contents: Read+write** (the request
+> routes only need Issues) and the Worker to be deployed with the `/inventory` route.
+> See `worker/SETUP.md` §5.
+
 ## Handling change requests (as they come in)
 Requests submitted from the portal appear as **GitHub Issues** in the repo:
 - **`request:reassign`** — the crew says an asset's trade is wrong. Make the correction

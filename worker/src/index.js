@@ -8,10 +8,16 @@
  *   POST /req        -> ADMIN: create a req-tracker Issue from a parsed Req.
  *   GET  /reqs       -> list trackers (?state=open|closed), cached ~60s.
  *   POST /req/deliver-> ADMIN: log a delivery on a line; auto-close at 100%.
+ * Equipment Master inventory:
+ *   POST /inventory  -> ADMIN: commit browser-parsed inventory JSON to main
+ *                       (data/meta.json, data/sites.json, data/sites/<code>.json).
  *
  * Secrets/vars:
  *   GH_TOKEN, GH_REPO, SUBMIT_KEY, ALLOWED_ORIGIN,
- *   ADMIN_KEY  (private; gates the /req* write routes — NOT in any page)
+ *   ADMIN_KEY  (private; gates the /req* and /inventory write routes — NOT in any page)
+ *
+ * NOTE: /inventory needs GH_TOKEN to have Contents: Read+write (the /req* and
+ * /requests routes only need Issues). Add that scope before enabling imports.
  */
 
 const CANON = ["Civil","Electrical","Foundation","Collection","Install","Mechanical",
@@ -47,6 +53,8 @@ export default {
       return getReqs(url, env, h, ctx);
     } else if (path === "/req/deliver" && req.method === "POST"){
       return postDeliver(req, env, h);
+    } else if (path === "/inventory" && req.method === "POST"){
+      return postInventory(req, env, h);
     } else if (path === "/health" && req.method === "GET"){
       return health(env, h);
     }
@@ -215,6 +223,73 @@ async function postDeliver(req, env, h){
   if (!pr.ok) { const t = await pr.text(); return json({ error: "github " + pr.status, detail: t.slice(0, 300) }, 502, h); }
   const updated = await pr.json();
   return json({ ok: true, complete, tracker: computeTracker(updated) }, 200, h);
+}
+
+/* ============================ inventory publish (Equipment Master import) ============================ */
+/**
+ * POST /inventory  (ADMIN only)
+ * Body: { meta:{builtAt,sourceVersion,assetCount,siteCount}, index:[{code,name,count}], siteData:{code:[asset,...]} }
+ * Commits data/meta.json, data/sites.json and data/sites/<code>.json to `main`
+ * in a single atomic commit (GitHub Git Data API), deleting per-site files
+ * that are no longer present. Requires GH_TOKEN with Contents: Read+write.
+ * The Excel itself is parsed in the browser and never uploaded — only JSON.
+ */
+const CODE_RE = /^[A-Za-z0-9_-]+$/;
+async function postInventory(req, env, h){
+  if (!requireAdmin(req, env)) return json({ error: "admin only" }, 401, h);
+  let b; try { b = await req.json(); } catch { return json({ error: "bad json" }, 400, h); }
+  if (!b || typeof b !== "object" || !b.meta || typeof b.meta !== "object"
+      || !Array.isArray(b.index) || !b.siteData || typeof b.siteData !== "object"){
+    return json({ error: "bad bundle" }, 400, h);
+  }
+  const codes = Object.keys(b.siteData);
+  if (!codes.length) return json({ error: "no sites" }, 400, h);
+  for (const c of codes){
+    if (!CODE_RE.test(c)) return json({ error: "bad site code: " + c }, 400, h);
+    if (!Array.isArray(b.siteData[c])) return json({ error: "site not array: " + c }, 400, h);
+  }
+  const api = `https://api.github.com/repos/${env.GH_REPO}`;
+  const gh = ghHeaders(env);
+  const jh = { ...gh, "Content-Type": "application/json" };
+  try {
+    // 1. current main ref -> base commit -> base tree
+    const refR = await fetch(`${api}/git/ref/heads/main`, { headers: gh });
+    if (!refR.ok) return json({ error: "ref " + refR.status, detail: (await refR.text()).slice(0, 300) }, 502, h);
+    const baseCommitSha = (await refR.json()).object.sha;
+    const cR = await fetch(`${api}/git/commits/${baseCommitSha}`, { headers: gh });
+    if (!cR.ok) return json({ error: "commit " + cR.status }, 502, h);
+    const baseTreeSha = (await cR.json()).tree.sha;
+    // 2. existing tree (to delete per-site files no longer present)
+    const tR = await fetch(`${api}/git/trees/${baseTreeSha}?recursive=1`, { headers: gh });
+    if (!tR.ok) return json({ error: "tree " + tR.status }, 502, h);
+    const baseTree = await tR.json();
+    const keep = new Set(codes.map(c => `data/sites/${c}.json`));
+    const entries = [];
+    for (const t of (baseTree.tree || [])){
+      if (t.type === "blob" && t.path.startsWith("data/sites/") && t.path.endsWith(".json") && !keep.has(t.path)){
+        entries.push({ path: t.path, mode: "100644", type: "blob", sha: null }); // delete stale
+      }
+    }
+    // 3. new/updated files (content inlined; GitHub creates the blobs)
+    entries.push({ path: "data/meta.json",  mode: "100644", type: "blob", content: JSON.stringify(b.meta) });
+    entries.push({ path: "data/sites.json", mode: "100644", type: "blob", content: JSON.stringify(b.index) });
+    for (const c of codes){
+      entries.push({ path: `data/sites/${c}.json`, mode: "100644", type: "blob", content: JSON.stringify(b.siteData[c]) });
+    }
+    // 4. tree -> 5. commit -> 6. move ref
+    const ntR = await fetch(`${api}/git/trees`, { method: "POST", headers: jh, body: JSON.stringify({ base_tree: baseTreeSha, tree: entries }) });
+    if (!ntR.ok) return json({ error: "newtree " + ntR.status, detail: (await ntR.text()).slice(0, 300) }, 502, h);
+    const newTreeSha = (await ntR.json()).sha;
+    const msg = `Update inventory data — ${b.meta.sourceVersion || "upload"} (${b.meta.assetCount || 0} assets, ${b.index.length} sites) [portal]`;
+    const coR = await fetch(`${api}/git/commits`, { method: "POST", headers: jh, body: JSON.stringify({ message: msg, tree: newTreeSha, parents: [baseCommitSha] }) });
+    if (!coR.ok) return json({ error: "mkcommit " + coR.status, detail: (await coR.text()).slice(0, 300) }, 502, h);
+    const newCommitSha = (await coR.json()).sha;
+    const upR = await fetch(`${api}/git/refs/heads/main`, { method: "PATCH", headers: jh, body: JSON.stringify({ sha: newCommitSha }) });
+    if (!upR.ok) return json({ error: "updateref " + upR.status, detail: (await upR.text()).slice(0, 300) }, 502, h);
+    return json({ ok: true, commit: newCommitSha, assetCount: b.meta.assetCount || 0, siteCount: b.index.length }, 200, h);
+  } catch (e) {
+    return json({ error: "exception", detail: String(e).slice(0, 300) }, 502, h);
+  }
 }
 
 /* ============================ health (config diagnostics; no secrets exposed) ============================ */

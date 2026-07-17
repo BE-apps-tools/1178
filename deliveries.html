@@ -126,6 +126,7 @@
   .ordrow .meta{font-size:12px;color:var(--medium-gray);}
   .ordrow select{margin-left:auto;min-width:160px;width:auto;flex:0 1 auto;}
   .ordrow.ready{border-left-color:var(--energy-blue);}
+  .ordrow.dupe{opacity:0.6;border-left-color:var(--medium-gray);}
 
   /* Per-line delivery/pickup logging */
   .logcell .ev{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:5px;}
@@ -195,7 +196,6 @@
       <div class="adminbar">
         <button class="btn secondary small" id="adminBtn">Admin unlock</button>
         <span class="who" id="adminWho" style="display:none;"></span>
-        <button class="btn small" id="newBtn" style="display:none;">New tracker</button>
       </div>
 
       <div class="banner" id="banner"></div>
@@ -240,7 +240,7 @@
 const WORKER_URL = "https://asset-portal.site-asset-manager.workers.dev";
 const TRADES = ["Civil","Electrical","Foundation","Collection","Install","Mechanical",
   "Commissioning","Substation","BESS","Safety","SM/PCC","Survey","Quality","TLine","Inventory","Decom","Other"];
-const STATE = { trackers:[], state:"open", admin:false, adminName:"", pendingOrders:null };
+const STATE = { trackers:[], state:"open", admin:false, adminName:"", pendingOrders:null, existingReqs:null };
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
@@ -369,7 +369,6 @@ function setAdmin(on){
   STATE.admin=on;
   $("#adminBtn").style.display=on?"none":"inline-flex";
   $("#adminWho").style.display=on?"inline":"none";
-  $("#newBtn").style.display=on?"inline-flex":"none";
   $("#adminWho").textContent=on?("Admin: "+STATE.adminName):"";
   if(!on){ $("#newPanel").classList.remove("show"); }
   render();
@@ -385,6 +384,16 @@ function adminUnlock(){
 }
 
 /* ---------- new trackers (one per order, admin assigns a trade to each) ---------- */
+/* Existing Req #s (open + closed) — used to skip orders already tracked. */
+async function fetchExistingReqNumbers(){
+  const set=new Set();
+  for(const st of ["open","closed"]){
+    try{ const r=await fetch(wbase()+"/reqs?state="+st); if(!r.ok) continue;
+      const d=await r.json(); (d.trackers||[]).forEach(t=>set.add(String(t.reqNumber))); }catch(e){}
+  }
+  return set;
+}
+function orderExists(o){ return !!(STATE.existingReqs && STATE.existingReqs.has(String(o.reqNumber))); }
 function ordTradeSelect(idx, val){
   return '<select class="ordtrade" data-idx="'+idx+'"><option value="">Trade…</option>'+
     TRADES.map(t=>'<option value="'+t+'"'+(t===val?' selected':'')+'>'+t+'</option>').join("")+'</select>';
@@ -394,20 +403,27 @@ function renderPreview(){
   if(!orders){ el.innerHTML=""; $("#setAllWrap").style.display="none"; $("#createBtn").disabled=true; $("#createBtn").textContent="Create trackers"; return; }
   $("#setAllWrap").style.display="block";
   const totalLines=orders.reduce((s,o)=>s+o.lines.length,0);
-  const rows=orders.map((o,i)=>
-    '<div class="ordrow'+(o.trade?' ready':'')+'" data-row="'+i+'">'+
+  const dupes=orders.filter(orderExists).length;
+  const rows=orders.map((o,i)=>{
+    const dup=orderExists(o);
+    return '<div class="ordrow'+(dup?' dupe':(o.trade?' ready':''))+'" data-row="'+i+'">'+
       '<span class="req">Req '+esc(o.reqNumber)+'</span>'+
       '<span class="meta">'+o.lines.length+' line'+(o.lines.length===1?'':'s')+'</span>'+
-      ordTradeSelect(i, o.trade)+
-    '</div>').join("");
-  el.innerHTML='<div class="ordsum">'+orders.length+' order'+(orders.length===1?'':'s')+' &middot; '+totalLines+' lines &middot; assign a trade to each order</div>'+rows;
+      (dup ? '<span class="badge" style="margin-left:auto;">Already tracked · skipped</span>'
+           : ordTradeSelect(i, o.trade))+
+    '</div>';
+  }).join("");
+  const newCount=orders.length-dupes;
+  el.innerHTML='<div class="ordsum">'+orders.length+' order'+(orders.length===1?'':'s')+' &middot; '+totalLines+' lines &middot; '+
+    newCount+' new'+(dupes?(' &middot; '+dupes+' already tracked (skipped)'):'')+' &middot; assign a trade to each new order</div>'+rows;
   updateCreateEnabled();
 }
+function newOrders(){ return (STATE.pendingOrders||[]).filter(o=>!orderExists(o)); }
 function updateCreateEnabled(){
-  const orders=STATE.pendingOrders||[];
-  const ready=orders.length && orders.every(o=>TRADES.includes(o.trade));
+  const nw=newOrders();
+  const ready=nw.length && nw.every(o=>TRADES.includes(o.trade));
   $("#createBtn").disabled=!ready;
-  $("#createBtn").textContent = orders.length? ("Create "+orders.length+" tracker"+(orders.length===1?"":"s")) : "Create trackers";
+  $("#createBtn").textContent = nw.length? ("Create "+nw.length+" tracker"+(nw.length===1?"":"s")) : "No new orders";
 }
 const wbase = () => WORKER_URL.replace(/\/$/,"");
 function adminKey(){ return localStorage.getItem("bac_admin_key")||""; }
@@ -510,20 +526,20 @@ function renderTracker(t){
 function initTrades(){ const f=$("#fTrade"), sa=$("#setAllTrade");
   TRADES.forEach(t=>{ const o=document.createElement("option");o.value=t;o.textContent=t;f.appendChild(o);
     const o2=document.createElement("option");o2.value=t;o2.textContent=t;sa.appendChild(o2); }); }
-function resetNewPanel(){ STATE.pendingOrders=null; $("#reqFile").value=""; $("#setAllTrade").value=""; renderPreview(); }
+function resetNewPanel(){ STATE.pendingOrders=null; STATE.existingReqs=null; $("#reqFile").value=""; $("#setAllTrade").value=""; renderPreview(); }
 function bind(){
   $("#adminBtn").addEventListener("click", adminUnlock);
-  $("#newBtn").addEventListener("click", ()=>{ $("#newPanel").classList.add("show"); });
   $("#cancelNew").addEventListener("click", ()=>{ $("#newPanel").classList.remove("show"); resetNewPanel(); });
   $("#reqFile").addEventListener("change", async e=>{
     const f=e.target.files[0]; if(!f) return;
     try{ toast("Reading file…"); STATE.pendingOrders=await parseReqXlsx(f); renderPreview();
+      STATE.existingReqs=await fetchExistingReqNumbers(); renderPreview();   // flag already-tracked orders
       toast("Parsed "+STATE.pendingOrders.length+" order"+(STATE.pendingOrders.length===1?"":"s")); }
     catch(err){ STATE.pendingOrders=null; renderPreview(); banner("Could not read file: "+err.message); }
   });
   $("#setAllTrade").addEventListener("change", e=>{
     const v=e.target.value; if(!v||!STATE.pendingOrders) return;
-    STATE.pendingOrders.forEach(o=>o.trade=v); renderPreview();
+    STATE.pendingOrders.forEach(o=>{ if(!orderExists(o)) o.trade=v; }); renderPreview();
   });
   $("#preview").addEventListener("change", e=>{
     const sel=e.target.closest(".ordtrade"); if(!sel||!STATE.pendingOrders) return;
@@ -532,15 +548,15 @@ function bind(){
     updateCreateEnabled();
   });
   $("#createBtn").addEventListener("click", async ()=>{
-    const orders=STATE.pendingOrders||[];
-    if(!orders.length){ toast("Upload a file first"); return; }
-    if(!orders.every(o=>TRADES.includes(o.trade))){ toast("Assign a trade to every order"); return; }
+    const orders=newOrders();
+    if(!orders.length){ toast("No new orders to create"); return; }
+    if(!orders.every(o=>TRADES.includes(o.trade))){ toast("Assign a trade to every new order"); return; }
     $("#createBtn").disabled=true;
     let ok=0, fail=0; const created=[];
     for(let i=0;i<orders.length;i++){
       const o=orders[i]; toast("Creating "+(i+1)+"/"+orders.length+"…");
       const res=await createTracker({ reqNumber:o.reqNumber, trade:o.trade, lines:o.lines });
-      if(res.ok){ ok++; if(res.tracker) created.push(res.tracker); } else fail++;
+      if(res.ok){ ok++; if(res.tracker) created.push(res.tracker); if(STATE.existingReqs) STATE.existingReqs.add(String(o.reqNumber)); } else fail++;
     }
     STATE.state="open"; $("#segActive").setAttribute("aria-selected","true"); $("#segDone").setAttribute("aria-selected","false");
     created.reverse().forEach(tr=>STATE.trackers.unshift(tr));

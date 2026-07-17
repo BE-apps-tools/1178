@@ -241,9 +241,6 @@
     <div class="subbar">
       <label for="siteSelect">Site</label>
       <select id="siteSelect" style="min-width:240px;"><option value="">Select a site…</option></select>
-      <button class="btn secondary small" id="adminBtn" style="min-height:34px;">Admin</button>
-      <span class="who" id="adminWho" style="display:none;"></span>
-      <button class="btn small" id="importBtn" style="display:none;min-height:34px;">Import Equipment Master</button>
       <span class="count" id="count"></span>
     </div>
 
@@ -627,11 +624,7 @@ function switchTab(name){
    ========================================================================== */
 function adminKey(){ return localStorage.getItem("bac_admin_key")||""; }
 function setAdmin(on){
-  STATE.admin=on;
-  $("#adminBtn").style.display=on?"none":"inline-flex";
-  $("#adminWho").style.display=on?"inline":"none";
-  $("#importBtn").style.display=on?"inline-flex":"none";
-  $("#adminWho").textContent=on?("Admin: "+STATE.adminName):"";
+  STATE.admin=on;                          // gates the import panel (opened via the Admin tab)
   if(!on){ $("#importPanel").style.display="none"; }
 }
 function adminUnlock(){
@@ -814,8 +807,6 @@ function fillTradeControls(){
 }
 function bind(){
   document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>switchTab(b.dataset.panel)));
-  $("#adminBtn").addEventListener("click", adminUnlock);
-  $("#importBtn").addEventListener("click", ()=>{ const p=$("#importPanel"); p.style.display = p.style.display==="none"?"block":"none"; });
   $("#emCancel").addEventListener("click", ()=>{ $("#importPanel").style.display="none"; STATE.pendingInventory=null; $("#emFile").value=""; renderEmPreview(); });
   $("#emFile").addEventListener("change", async e=>{
     const f=e.target.files[0]; if(!f) return;

@@ -181,13 +181,9 @@
         <p>At-a-glance status across the site inventory and workflows.</p>
       </div>
 
-      <section class="kpis" id="kpis" aria-label="Key metrics"></section>
-
-      <div class="intro" style="margin-top:34px;">
-        <h2>Tools</h2>
-        <div class="rule"></div>
-      </div>
-      <div class="grid" id="grid"></div>
+      <section class="kpis" id="kpis" aria-label="Key metrics">
+        <div class="kpi"><div class="grow"><div class="lbl">Loading…</div></div></div>
+      </section>
     </main>
 
     <footer>&copy; 2026 Blattner. Internal tools.</footer>
@@ -196,54 +192,8 @@
 
 <script>
 "use strict";
-/* ============================================================
-   EDIT HERE to add a feature: add an object to APPS.
-   status: "live"  -> card links to `href`
-           "soon"  -> card shows "Coming soon" (no link)
-   kind: "inv" (inventory chip) | "proc" (procurement chip)
-   ============================================================ */
-const APPS = [
-  {
-    eyebrow: "Inventory",
-    title: "Asset Inventory",
-    desc: "Review the Equipment Master by site, search by unit or serial, and submit trade-reassignment or issue requests.",
-    href: "inventory.html",
-    status: "live",
-    kind: "inv"
-  },
-  {
-    eyebrow: "Procurement",
-    title: "Deliveries",
-    desc: "Track Reqs delivered by trade. Updated daily.",
-    href: "deliveries.html",
-    status: "live",
-    kind: "proc"
-  }
-  // Add future features here, e.g.:
-  // { eyebrow:"Field", title:"My Tool", desc:"…", href:"mytool.html", status:"live", kind:"inv" }
-];
-
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 const $ = s => document.querySelector(s);
-
-function render(){
-  document.getElementById("grid").innerHTML = APPS.map((a,i) => {
-    const foot = a.status === "live"
-      ? '<a class="open-btn" href="' + esc(a.href) + '">Open</a>'
-      : '<span class="soon-tag">Coming soon</span>';
-    const cls = "card" + (a.status === "live" ? "" : " soon") + (a.kind === "proc" ? " proc" : "");
-    return '<div class="' + cls + '" style="animation-delay:' + (0.06 * i) + 's">' +
-      '<div class="accent-top"></div>' +
-      '<div class="body">' +
-        '<div class="chip" aria-hidden="true"></div>' +
-        '<div class="eyebrow">' + esc(a.eyebrow) + '</div>' +
-        '<h3>' + esc(a.title) + '</h3>' +
-        '<p>' + esc(a.desc) + '</p>' +
-      '</div>' +
-      '<div class="foot">' + foot + '</div>' +
-    '</div>';
-  }).join("");
-}
 
 /* Last-updated pill (date + time from the build's ISO timestamp). */
 function fmtUpdated(iso){
@@ -324,7 +274,6 @@ async function loadDashboard(){
   });
 }
 
-render();
 loadDashboard();
 </script>
 </body>

@@ -2,9 +2,13 @@ name = "asset-portal"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
-# Secrets/vars are NOT stored here. Set them after deploy:
-#   wrangler secret put GH_TOKEN
-#   wrangler secret put GH_REPO
-#   wrangler secret put SUBMIT_KEY
-#   wrangler secret put ALLOWED_ORIGIN
-# (or add them in the Cloudflare dashboard: Workers > asset-portal > Settings > Variables)
+# Non-secret variables live here so they survive every (Git-connected) redeploy.
+# (Previously set only in the dashboard, they were wiped on each `wrangler deploy`.)
+[vars]
+GH_REPO = "NapsterX27/AsSet-Capture-BEI"
+ALLOWED_ORIGIN = "https://napsterx27.github.io"
+
+# Secrets are set in the Cloudflare dashboard (they persist across deploys):
+#   GH_TOKEN    – fine-grained PAT, Issues read+write
+#   SUBMIT_KEY  – public spam-deterrent for reassignment requests
+#   ADMIN_KEY   – private gate for delivery-tracker writes

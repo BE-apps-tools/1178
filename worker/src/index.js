@@ -47,6 +47,8 @@ export default {
       return getReqs(url, env, h, ctx);
     } else if (path === "/req/deliver" && req.method === "POST"){
       return postDeliver(req, env, h);
+    } else if (path === "/health" && req.method === "GET"){
+      return health(env, h);
     }
     return new Response("not found", { status: 404, headers: h });
   },
@@ -213,6 +215,22 @@ async function postDeliver(req, env, h){
   if (!pr.ok) { const t = await pr.text(); return json({ error: "github " + pr.status, detail: t.slice(0, 300) }, 502, h); }
   const updated = await pr.json();
   return json({ ok: true, complete, tracker: computeTracker(updated) }, 200, h);
+}
+
+/* ============================ health (config diagnostics; no secrets exposed) ============================ */
+async function health(env, h){
+  const out = {
+    hasToken: !!env.GH_TOKEN, hasRepo: !!env.GH_REPO, repo: env.GH_REPO || null,
+    hasSubmitKey: !!env.SUBMIT_KEY, hasAdminKey: !!env.ADMIN_KEY,
+    allowedOrigin: env.ALLOWED_ORIGIN || null, github: null,
+  };
+  if (env.GH_TOKEN && env.GH_REPO){
+    try {
+      const r = await fetch(`https://api.github.com/repos/${env.GH_REPO}`, { headers: ghHeaders(env) });
+      out.github = { status: r.status, ok: r.ok };
+    } catch (e) { out.github = { error: String(e) }; }
+  }
+  return json(out, 200, h);
 }
 
 // Exported for the contract test (Python port mirrors these).

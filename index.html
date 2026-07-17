@@ -97,6 +97,20 @@
   .soon-tag{font-family:'Arial Black', Arial, sans-serif;text-transform:uppercase;font-size:11px;letter-spacing:0.04em;
     color:var(--medium-gray);border:1px solid var(--light-gray);border-radius:var(--r-sm);padding:11px 16px;display:inline-block;}
 
+  /* Admin card (bottom of the column) */
+  .adminzone{margin-top:22px;}
+  .card.admin{border-radius:var(--r);}
+  .card.admin .accent-top{background:var(--dark-blue);}
+  .card.admin .chip{background:var(--light-blue);}
+  .card.admin .chip::before{content:"";box-sizing:border-box;position:absolute;left:14px;top:10px;width:16px;height:13px;
+    border:3px solid var(--dark-blue);border-bottom:none;border-radius:8px 8px 0 0;background:none;box-shadow:none;}
+  .card.admin .chip::after{content:"";box-sizing:border-box;position:absolute;left:11px;top:19px;width:22px;height:16px;
+    background:var(--dark-blue);border-radius:3px;box-shadow:none;}
+  .admin-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+  .linkbtn{background:none;border:none;font-family:'Arial Black', Arial, sans-serif;text-transform:uppercase;
+    font-size:11px;letter-spacing:0.04em;color:var(--medium-gray);cursor:pointer;padding:11px 8px;}
+  .linkbtn:hover{color:var(--dark-blue);}
+
   footer{max-width:1160px;width:100%;margin:0 auto;padding:0 32px 40px;color:var(--medium-gray);font-size:11px;}
 
   /* ---------- Responsive ---------- */
@@ -162,6 +176,7 @@
       </div>
 
       <div class="grid" id="grid"></div>
+      <div class="adminzone" id="adminZone"></div>
     </main>
 
     <footer>&copy; 2026 Blattner. Internal tools.</footer>
@@ -234,7 +249,44 @@ async function loadMeta(){
   }
 }
 
+/* ---------- Admin (one sign-in, shared across the suite via localStorage) ---------- */
+function adminKey(){ return localStorage.getItem("bac_admin_key")||""; }
+function adminName(){ return localStorage.getItem("bac_admin_name")||""; }
+function adminSignIn(){
+  const n=prompt("Your name (shown on updates):"); if(n===null) return;
+  const k=prompt("Admin key:"); if(k===null) return;
+  localStorage.setItem("bac_admin_name", n.trim()||"admin");
+  localStorage.setItem("bac_admin_key", k.trim());
+  renderAdminCard();
+}
+function adminSignOut(){ localStorage.removeItem("bac_admin_key"); renderAdminCard(); }
+function renderAdminCard(){
+  const z=document.getElementById("adminZone");
+  if(adminKey()){
+    z.innerHTML='<div class="card admin"><div class="accent-top"></div>'+
+      '<div class="body"><div class="chip" aria-hidden="true"></div>'+
+        '<div class="eyebrow">Signed in'+(adminName()?(" &middot; "+esc(adminName())):"")+'</div>'+
+        '<h3>Admin</h3><p>Manage Equipment Master imports and delivery trackers.</p></div>'+
+      '<div class="foot admin-actions">'+
+        '<a class="open-btn" href="inventory.html?admin=import">Equipment Master</a>'+
+        '<a class="open-btn" href="deliveries.html?admin=new">New tracker</a>'+
+        '<button class="linkbtn" id="adminSignOut">Sign out</button>'+
+      '</div></div>';
+  } else {
+    z.innerHTML='<div class="card admin"><div class="accent-top"></div>'+
+      '<div class="body"><div class="chip" aria-hidden="true"></div>'+
+        '<div class="eyebrow">Restricted</div>'+
+        '<h3>Admin</h3><p>Sign in once to manage Equipment Master imports and delivery trackers.</p></div>'+
+      '<div class="foot"><button class="open-btn" id="adminSignIn">Admin sign in</button></div></div>';
+  }
+}
+document.getElementById("adminZone").addEventListener("click", e=>{
+  if(e.target.closest("#adminSignIn")) adminSignIn();
+  else if(e.target.closest("#adminSignOut")) adminSignOut();
+});
+
 render();
+renderAdminCard();
 loadMeta();
 </script>
 </body>

@@ -547,6 +547,8 @@ function bind(){
 async function init(){
   initTrades(); bind();
   STATE.adminName=localStorage.getItem("bac_admin_name")||"";
+  if(localStorage.getItem("bac_admin_key")) setAdmin(true);   // stay logged in on this device (shared with the hub)
+  if(STATE.admin && new URLSearchParams(location.search).get("admin")==="new"){ $("#newPanel").classList.add("show"); }
   await loadTrackers();
   render();
 }

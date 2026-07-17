@@ -858,6 +858,7 @@ async function init(){
   fillTradeControls(); bind();
   STATE.adminName = localStorage.getItem("bac_admin_name") || "";
   setAdmin(!!adminKey());   // stay logged in on this device (restore admin if the key is cached)
+  if(STATE.admin && new URLSearchParams(location.search).get("admin")==="import"){ $("#importPanel").style.display="block"; }
   STATE.meta = await loadMeta();
   if(STATE.meta && STATE.meta.builtAt){ const el=$("#asof"); el.innerHTML = fmtUpdated(STATE.meta.builtAt); el.classList.add("show"); }
   STATE.siteIndex = await loadSiteIndex();

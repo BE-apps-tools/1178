@@ -122,6 +122,12 @@
     text-transform:uppercase;font-size:10px;letter-spacing:0.06em;text-align:left;padding:12px 12px;white-space:nowrap;}
   thead th:first-child{border-top-left-radius:var(--r);} thead th:last-child{border-top-right-radius:var(--r);}
   tbody td{padding:10px 12px;border-bottom:1px solid var(--bright-gray);vertical-align:top;}
+  .selcol{width:36px;text-align:center;}
+  .selcol input{width:16px;height:16px;cursor:pointer;}
+  .batchbar{display:none;flex-wrap:wrap;align-items:center;gap:10px;background:var(--light-blue);
+    border:1px solid var(--energy-blue);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:14px;}
+  .batchbar .bcount{font-weight:bold;color:var(--dark-blue);font-size:12px;text-transform:uppercase;letter-spacing:0.05em;}
+  .batchbar select,.batchbar input{width:auto;flex:0 1 auto;min-width:150px;}
   tr.asset-row{cursor:pointer;transition:background .12s ease;}
   tr.asset-row:nth-child(4n+1){background:var(--bright-gray);}
   tr.asset-row:hover{background:var(--light-blue);}
@@ -272,9 +278,17 @@
           <select id="fTrade"><option value="">All trades</option></select>
           <select id="fStatus"><option value="">All statuses</option></select>
         </div>
+        <div class="batchbar" id="batchBar">
+          <span class="bcount" id="batchCount">0 selected</span>
+          <select id="batchTrade"><option value="">Assign trade…</option></select>
+          <input type="text" id="batchRequester" placeholder="Your name" autocomplete="off">
+          <button class="btn small" id="batchSubmit">Submit reassign request</button>
+          <button class="btn small secondary" id="batchClear">Clear</button>
+        </div>
         <div class="table-scroll">
           <table>
             <thead><tr>
+              <th class="selcol"><input type="checkbox" id="selAll" aria-label="Select shown assets"></th>
               <th>Unit #</th><th>Serial #</th><th>Description</th><th>Mfg / Yr</th>
               <th>Status</th><th>Trade</th><th>Assigned</th><th></th>
             </tr></thead>
@@ -361,7 +375,7 @@ const TRADES = ["Civil","Electrical","Foundation","Collection","Install","Mechan
 let WORKER_URL = "https://asset-portal.site-asset-manager.workers.dev";
 let SUBMIT_KEY = "access123!";   // spam deterrent; matches the Worker's SUBMIT_KEY var
 
-const STATE = { site:"", assets:[], meta:null, siteIndex:[], admin:false, adminName:"", pendingInventory:null };
+const STATE = { site:"", assets:[], meta:null, siteIndex:[], admin:false, adminName:"", pendingInventory:null, selected:new Set() };
 let REQ_TARGET = null;
 let OPEN_REQ = {};                    // "unit|serial" -> [ {issue,url,type,requestedTrade} ]
 const rkey = (u,s) => u + "|" + s;
@@ -479,6 +493,7 @@ function renderInventory(){
     const pend=(OPEN_REQ[rkey(a.unit,a.serial)]||[]);
     const pendBadge = pend.length ? '<a class="pending-badge" href="'+esc(pend[0].url)+'" target="_blank" rel="noopener">Pending #'+esc(pend[0].issue)+'</a> ' : '';
     tr.innerHTML=
+      '<td class="selcol"><input type="checkbox" class="rowsel" data-unit="'+esc(a.unit)+'" data-serial="'+esc(a.serial)+'"'+(STATE.selected.has(rkey(a.unit,a.serial))?' checked':'')+'></td>'+
       '<td class="id">'+esc(a.unit)+'</td>'+
       '<td>'+esc(a.serial)+'</td>'+
       '<td class="desc">'+esc(a.description)+(a.description2?'<div class="d2">'+esc(a.description2)+'</div>':'')+'</td>'+
@@ -488,15 +503,16 @@ function renderInventory(){
       '<td>'+esc(a.assignedEmployee==="0"?"":a.assignedEmployee)+'</td>'+
       '<td><div class="row-actions">'+pendBadge+'<button class="btn small" data-req-unit="'+esc(a.unit)+'" data-req-serial="'+esc(a.serial)+'">Request</button></div></td>';
     const detail=document.createElement("tr"); detail.className="detail-row"; detail.style.display="none";
-    detail.innerHTML='<td colspan="8"><div class="detail-grid">'+
+    detail.innerHTML='<td colspan="9"><div class="detail-grid">'+
       dt("Company",a.company)+dt("Location",a.location)+dt("Location code",a.locationCode)+
       dt("Transfer #",a.transferNumber)+dt("Finance",a.financeMethod)+dt("Asset #",a.assetNumber)+
       dt("From date",a.fromDate)+dt("Acquired",a.acquiredDate)+dt("Additional info",a.additionalInfo)+dt("Remarks",a.remarks)+
       '</div></td>';
-    tr.addEventListener("click",e=>{ if(e.target.closest("[data-req-unit]")) return;
+    tr.addEventListener("click",e=>{ if(e.target.closest("[data-req-unit]")||e.target.closest(".selcol")) return;
       detail.style.display = detail.style.display==="none"?"":"none"; });
     body.appendChild(tr); body.appendChild(detail);
   });
+  updateBatchBar();
   $("#showing").textContent = STATE.assets.length
     ? ("Showing " + shown.length + " of " + v.length + " matches"
         + (v.length > CAP ? " — refine your search to narrow this list" : "")
@@ -509,6 +525,43 @@ function fillStatusFilter(){
   const sel=$("#fStatus"); sel.innerHTML='<option value="">All statuses</option>';
   [...new Set(STATE.assets.map(a=>a.status).filter(Boolean))].sort().forEach(s=>{
     const o=document.createElement("option"); o.value=s; o.textContent=s; sel.appendChild(o); });
+}
+
+/* ---------- batch reassignment ---------- */
+function updateBatchBar(){
+  const n=STATE.selected.size, bar=$("#batchBar");
+  if(bar){ bar.style.display=n?"flex":"none"; $("#batchCount").textContent=n+" selected"; }
+  const boxes=[...document.querySelectorAll("#invBody .rowsel")], sa=$("#selAll");
+  if(sa){ const ch=boxes.filter(b=>b.checked).length;
+    sa.checked=boxes.length>0 && ch===boxes.length; sa.indeterminate=ch>0 && ch<boxes.length; }
+}
+function clearSelection(){ STATE.selected.clear(); document.querySelectorAll("#invBody .rowsel").forEach(b=>b.checked=false); updateBatchBar(); }
+async function batchSubmit(){
+  const trade=$("#batchTrade").value;
+  if(!TRADES.includes(trade)){ toast("Pick a trade to assign"); return; }
+  const requester=$("#batchRequester").value.trim();
+  if(!requester){ toast("Enter your name"); return; }
+  const assets=STATE.assets.filter(a=>STATE.selected.has(rkey(a.unit,a.serial)));
+  if(!assets.length){ toast("Select at least one asset"); return; }
+  const todo=assets.filter(a=>!(OPEN_REQ[rkey(a.unit,a.serial)]||[]).some(q=>q.type==="reassign"));
+  const skipped=assets.length-todo.length;
+  if(!todo.length){ toast("All selected already have an open reassignment request"); return; }
+  if(!window.confirm("Submit reassignment request → "+trade+" for "+todo.length+" asset"+(todo.length===1?"":"s")+"?"+(skipped?(" ("+skipped+" already open, skipped)"):""))) return;
+  cacheSet("bac_portal_requester", requester);
+  $("#batchSubmit").disabled=true;
+  let ok=0, fail=0;
+  for(let i=0;i<todo.length;i++){
+    const a=todo[i]; toast("Submitting "+(i+1)+"/"+todo.length+"…");
+    const res=await submitRequest({ type:"reassign", site:STATE.site, unit:a.unit, serial:a.serial,
+      description:a.description, currentTrade:a.trade||"", requestedTrade:trade,
+      detail:"Batch reassignment to "+trade, requester });
+    if(res.ok||res.queued) ok++; else fail++;
+  }
+  STATE.selected.clear();
+  if(WORKER_URL){ await loadOpenRequests(STATE.site); }
+  renderInventory(); renderMyRequests();
+  $("#batchSubmit").disabled=false; $("#batchTrade").value="";
+  toast("Submitted "+ok+" request"+(ok===1?"":"s")+(skipped?(" · "+skipped+" skipped"):"")+(fail?(" · "+fail+" failed"):""));
 }
 
 /* ---------- request flow ---------- */
@@ -803,10 +856,11 @@ async function publishInventory(){
 /* ---------- boot ---------- */
 const TRADE_NONE = "__none__";   // filter sentinel for assets with no trade assigned
 function fillTradeControls(){
-  const f=$("#fTrade"), r=$("#reqTrade");
+  const f=$("#fTrade"), r=$("#reqTrade"), bt=$("#batchTrade");
   const un=document.createElement("option"); un.value=TRADE_NONE; un.textContent="Unassigned"; f.appendChild(un);
   TRADES.forEach(t=>{ const o=document.createElement("option"); o.value=t; o.textContent=t; f.appendChild(o);
-    const o2=document.createElement("option"); o2.value=t; o2.textContent=t; r.appendChild(o2); });
+    const o2=document.createElement("option"); o2.value=t; o2.textContent=t; r.appendChild(o2);
+    const o3=document.createElement("option"); o3.value=t; o3.textContent=t; bt.appendChild(o3); });
 }
 function bind(){
   document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>switchTab(b.dataset.panel)));
@@ -818,7 +872,7 @@ function bind(){
   });
   $("#emPublish").addEventListener("click", publishInventory);
   $("#siteSelect").addEventListener("change", async e=>{
-    const code=e.target.value; STATE.site=code;
+    const code=e.target.value; STATE.site=code; STATE.selected.clear();
     if(!code){ STATE.assets=[]; OPEN_REQ={}; renderStats(); renderInventory(); $("#count").textContent=""; return; }
     $("#count").textContent = "Loading…";
     $("#invEmpty").style.display = "block";
@@ -835,6 +889,20 @@ function bind(){
   $("#invBody").addEventListener("click", e=>{
     const b=e.target.closest("[data-req-unit]"); if(b) openRequestFor(b.dataset.reqUnit, b.dataset.reqSerial);
   });
+  $("#invBody").addEventListener("change", e=>{
+    const cb=e.target.closest(".rowsel"); if(!cb) return;
+    const k=cb.dataset.unit+"|"+cb.dataset.serial;
+    if(cb.checked) STATE.selected.add(k); else STATE.selected.delete(k);
+    updateBatchBar();
+  });
+  $("#selAll").addEventListener("change", e=>{
+    const on=e.target.checked;
+    document.querySelectorAll("#invBody .rowsel").forEach(b=>{ b.checked=on;
+      const k=b.dataset.unit+"|"+b.dataset.serial; if(on) STATE.selected.add(k); else STATE.selected.delete(k); });
+    updateBatchBar();
+  });
+  $("#batchSubmit").addEventListener("click", batchSubmit);
+  $("#batchClear").addEventListener("click", clearSelection);
   $("#reqType").addEventListener("change", syncReqType);
   $("#reqCancel").addEventListener("click", ()=>switchTab("inv"));
   $("#reqForm").addEventListener("submit", async e=>{
@@ -853,6 +921,7 @@ function bind(){
 }
 async function init(){
   fillTradeControls(); bind();
+  $("#batchRequester").value = cacheGet("bac_portal_requester") || "";
   STATE.adminName = localStorage.getItem("bac_admin_name") || "";
   setAdmin(!!adminKey());   // stay logged in on this device (restore admin if the key is cached)
   if(STATE.admin && new URLSearchParams(location.search).get("admin")==="import"){ $("#importPanel").style.display="block"; }

@@ -42,14 +42,23 @@ Each line captures two events, which happen at different times:
 ## Team view (everyone)
 - Open **Deliveries** (no unlock). Browse **Active** trackers; switch to
   **Completed** for history. **Search** by Req #/trade and filter by **Trade**.
-  Expand any tracker to see, per line: Part #, description, **Delivered**,
-  **Picked up**, **Picked up by**, and status.
+  Expand any tracker to see, per line: Part #, description, **Required** date,
+  **Delivered**, **Picked up**, **Picked up by**, and status.
+- **Overdue flags:** a line whose **Required** date has passed with nothing on
+  site yet is flagged **Overdue** (orange); within 3 days it shows **Due soon**.
+  A tracker with any overdue line gets an **Overdue** badge in its header.
+- **Print sheet:** expand a tracker and click **Print sheet** for a clean,
+  branded one-order pickup sheet (with a "Picked up by / date" column and a
+  sign-off line) to carry into the field.
 
 ## Corrections
 - Logged too much/little? Log an **adjusting** delivery or pickup on that line (a
   negative quantity subtracts). To remove a whole tracker, expand it and click
   **Delete order** (admin) — it leaves the app and its GitHub Issue is closed
   (labeled `req-deleted`) as a record.
+- **Purge legacy (admin):** old trackers created before the current format show a
+  **Purge N legacy** button on the Active toolbar — one click deletes them all
+  (each issue closed as a record).
 
 ## Good to know
 - **Data is public** (the repo is public): trackers contain material descriptions,

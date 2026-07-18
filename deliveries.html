@@ -727,6 +727,7 @@ async function init(){
   STATE.adminName=localStorage.getItem("bac_admin_name")||"";
   if(localStorage.getItem("bac_admin_key")) setAdmin(true);   // stay logged in on this device (shared with the hub)
   if(STATE.admin && new URLSearchParams(location.search).get("admin")==="new"){ $("#newPanel").classList.add("show"); }
+  const dq=new URLSearchParams(location.search).get("q"); if(dq){ $("#q").value=dq; }   // deep-link from Dashboard search
   await loadTrackers();
   render();
 }

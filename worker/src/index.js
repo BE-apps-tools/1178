@@ -10,6 +10,7 @@
  *   POST /req/deliver-> ADMIN: log a delivered/pickup event on a line.
  *   POST /req/delete -> ADMIN: remove a tracker (close issue, drop req-tracker label).
  *   POST /req/complete -> ADMIN: manually mark a tracker complete (close, keep label).
+ *   POST /req/trade  -> ADMIN: change a tracker's trade (title/body/label rewrite).
  * Equipment Master inventory:
  *   POST /inventory  -> ADMIN: commit browser-parsed inventory JSON to main
  *                       (data/meta.json, data/sites.json, data/sites/<code>.json).
@@ -59,6 +60,8 @@ export default {
       return postDeleteReq(req, env, h);
     } else if (path === "/req/complete" && req.method === "POST"){
       return postCompleteReq(req, env, h);
+    } else if (path === "/req/trade" && req.method === "POST"){
+      return postSetTrade(req, env, h);
     } else if (path === "/inventory" && req.method === "POST"){
       return postInventory(req, env, h);
     } else if (path === "/health" && req.method === "GET"){
@@ -284,6 +287,31 @@ async function postCompleteReq(req, env, h){
   if (!pr.ok) { const t = await pr.text(); return json({ error: "github " + pr.status, detail: t.slice(0, 300) }, 502, h); }
   const updated = await pr.json();
   return json({ ok: true, complete: true, tracker: computeTracker(updated) }, 200, h);
+}
+
+/* ADMIN: change a tracker's trade after creation — rewrites the marker/title/body
+ * and swaps the trade:* label. */
+async function postSetTrade(req, env, h){
+  if (!requireAdmin(req, env)) return json({ error: "admin only" }, 401, h);
+  let b; try { b = await req.json(); } catch { return json({ error: "bad json" }, 400, h); }
+  const issue = parseInt(b.issue, 10);
+  if (!issue) return json({ error: "missing issue" }, 400, h);
+  if (!CANON.includes(b.trade)) return json({ error: "bad trade" }, 400, h);
+  const gr = await fetch(`https://api.github.com/repos/${env.GH_REPO}/issues/${issue}`, { headers: ghHeaders(env) });
+  if (!gr.ok) return json({ error: "github " + gr.status }, 502, h);
+  const it = await gr.json();
+  const m = parseMarker(it.body);
+  if (!m || m.type !== "req") return json({ error: "not a tracker" }, 400, h);
+  m.trade = b.trade;
+  const labels = (it.labels || []).map(l => (typeof l === "string" ? l : l.name)).filter(n => n && !n.startsWith("trade:"));
+  labels.push(`trade:${b.trade}`);
+  const pr = await fetch(`https://api.github.com/repos/${env.GH_REPO}/issues/${issue}`, {
+    method: "PATCH", headers: { ...ghHeaders(env), "Content-Type": "application/json" },
+    body: JSON.stringify({ title: reqTitle(m), body: reqBody(m), labels }),
+  });
+  if (!pr.ok) { const t = await pr.text(); return json({ error: "github " + pr.status, detail: t.slice(0, 300) }, 502, h); }
+  const updated = await pr.json();
+  return json({ ok: true, tracker: computeTracker(updated) }, 200, h);
 }
 
 /* ============================ inventory publish (Equipment Master import) ============================ */

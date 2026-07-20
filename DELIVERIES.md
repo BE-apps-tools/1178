@@ -58,9 +58,13 @@ Each line captures two events, which happen at different times:
 
 ## Team view (everyone)
 - Open **Deliveries** (no unlock). Browse **Active** trackers; switch to
-  **Completed** for history. **Search** by Req #/trade and filter by **Trade**.
-  Expand any tracker to see, per line: Part #, description, **Required** date,
-  **Delivered**, **Picked up**, **Picked up by**, and status.
+  **Completed** for history. **Search** by Req #/trade/originator and filter by
+  **Trade** and by **Originator** (the Req's *Transaction Originator*, shown as
+  "By NAME" on each tracker). Expand any tracker to see, per line: Part #,
+  description, **Required** date, **Delivered**, **Picked up**, **Picked up by**,
+  and status.
+- **Change a trade (admin):** each tracker header has a **Trade** dropdown — pick
+  a new trade to reassign it after creation (updates instantly).
 - **Overdue flags:** a line whose **Required** date has passed with nothing on
   site yet is flagged **Overdue** (orange); within 3 days it shows **Due soon**.
   A tracker with any overdue line gets an **Overdue** badge in its header.

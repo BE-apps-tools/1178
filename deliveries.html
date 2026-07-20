@@ -119,6 +119,8 @@
   .trk .top{padding:14px 18px;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;cursor:pointer;}
   .trk .req{font-family:'Arial Black', Arial, sans-serif;color:var(--dark-blue);font-size:15px;}
   .trk .meta{font-size:12px;color:var(--medium-gray);}
+  .trk .meta.orig{font-weight:bold;text-transform:uppercase;font-size:10px;letter-spacing:0.04em;border:1px solid var(--light-gray);border-radius:999px;padding:3px 10px;}
+  .trkTrade{width:auto;min-width:130px;flex:0 0 auto;font-size:12px;padding:6px 10px;min-height:0;}
   .trk .prog{margin-left:auto;display:flex;align-items:center;gap:14px;}
   .trk .prog .lines{font-size:12px;font-weight:bold;color:var(--dark-blue);text-align:right;white-space:nowrap;}
   .trk .detail{display:none;padding:0 18px 18px;}
@@ -247,6 +249,7 @@
       <div class="toolbar">
         <div class="search"><input type="text" id="q" aria-label="Search requisitions" placeholder="Search Req #, project, description…"></div>
         <select id="fTrade"><option value="">All trades</option></select>
+        <select id="fOriginator"><option value="">All originators</option></select>
         <div class="seg" role="tablist">
           <button id="segActive" aria-selected="true">Active</button>
           <button id="segDone" aria-selected="false">Completed</button>
@@ -358,7 +361,8 @@ function sheetRows(xml, shared){
    2nd Item Number (Part #), UM, Request Date, Description Line 2.
    Everything else is ignored; no ordered quantity is captured. */
 const REQ_COLS = { order:"Order Number", line:"Line Number", desc:"Line Description",
-  part:"2nd Item Number", uom:"UM", reqDate:"Request Date", desc2:"Description Line 2" };
+  part:"2nd Item Number", uom:"UM", reqDate:"Request Date", desc2:"Description Line 2",
+  originator:"Transaction Originator" };
 function firstSheetPath(wb, relMap){
   const m=/<sheet\s+[^>]*r:id="([^"]+)"/.exec(wb);
   if(!m) throw new Error("No sheet found in workbook");
@@ -383,8 +387,9 @@ async function parseReqXlsx(file){
   const iOrder=col(REQ_COLS.order);
   if(iOrder<0) throw new Error('Header "'+REQ_COLS.order+'" not found. Headers: '+(hdrRaw.filter(Boolean).join(", ")||"(none)"));
   const iLine=col(REQ_COLS.line), iDesc=col(REQ_COLS.desc), iPart=col(REQ_COLS.part),
-        iUom=col(REQ_COLS.uom), iReq=col(REQ_COLS.reqDate), iD2=col(REQ_COLS.desc2);
-  const byOrder=new Map();
+        iUom=col(REQ_COLS.uom), iReq=col(REQ_COLS.reqDate), iD2=col(REQ_COLS.desc2),
+        iOrig=col(REQ_COLS.originator);
+  const byOrder=new Map(), byOrig=new Map();
   for(let r=1;r<rows.length;r++){
     const row=rows[r];
     const order=cleanNum(iOrder>=0?row[iOrder]:"");
@@ -397,10 +402,12 @@ async function parseReqXlsx(file){
       desc:d1+(d2?(" "+d2):""), uom:iUom>=0?String(row[iUom]||"").trim():"",
       requiredDate:iReq>=0?excelSerialToISO(row[iReq]):"" };
     if(!line.desc && !part && line.line==="") continue;
+    const orig=iOrig>=0?String(row[iOrig]||"").trim():"";
+    if(orig && !byOrig.get(order)) byOrig.set(order, orig);   // first non-empty originator per order
     if(!byOrder.has(order)) byOrder.set(order, []);
     byOrder.get(order).push(line);
   }
-  const orders=[...byOrder.entries()].map(([reqNumber,lines])=>({reqNumber, trade:"", lines, excluded:false}));
+  const orders=[...byOrder.entries()].map(([reqNumber,lines])=>({reqNumber, trade:"", lines, excluded:false, originator:byOrig.get(reqNumber)||""}));
   orders.sort((a,b)=>String(a.reqNumber).localeCompare(String(b.reqNumber),undefined,{numeric:true}));
   if(!orders.length) throw new Error("No order rows found (every row was missing an Order Number).");
   return orders;   /* NOTE: no cost/quantity field is ever produced */
@@ -476,11 +483,11 @@ function orderChunks(o){ return Math.max(1, Math.ceil((o.lines.length||0)/MAX_LI
    65,536-char issue body). Chunks share the Req # (so re-imports still skip it)
    and carry a "Part i of N" label. */
 function chunkOrder(o){
-  const n=orderChunks(o);
-  if(n<=1) return [{ reqNumber:o.reqNumber, trade:o.trade, project:o.project||"", lines:o.lines }];
+  const n=orderChunks(o), req=o.originator||"";
+  if(n<=1) return [{ reqNumber:o.reqNumber, trade:o.trade, project:o.project||"", requisitioner:req, lines:o.lines }];
   const out=[];
   for(let i=0;i<n;i++){
-    out.push({ reqNumber:o.reqNumber, trade:o.trade,
+    out.push({ reqNumber:o.reqNumber, trade:o.trade, requisitioner:req,
       project:(o.project?o.project+" · ":"")+"Part "+(i+1)+" of "+n,
       lines:o.lines.slice(i*MAX_LINES,(i+1)*MAX_LINES) });
   }
@@ -532,6 +539,12 @@ async function completeReq(issue){
   if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
   return await r.json();
 }
+async function setTradeReq(issue, trade){
+  const r=await fetch(wbase()+"/req/trade",{method:"POST",headers:{"Content-Type":"application/json","x-admin-key":adminKey()},
+    body:JSON.stringify({issue, trade})});
+  if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
+  return await r.json();
+}
 function lineDelivered(l){ return (l.deliveries||[]).reduce((s,d)=>s+(Number(d.qty)||0),0); }
 function linePickedUp(l){ return (l.pickups||[]).reduce((s,p)=>s+(Number(p.qty)||0),0); }
 function lineStatus(delivered, picked){
@@ -573,12 +586,22 @@ function animateProgress(root){
 }
 
 /* ---------- render trackers ---------- */
+function trackerOriginator(t){ return (t.marker && t.marker.requisitioner) || ""; }
 function viewTrackers(){
-  const q=$("#q").value.trim().toLowerCase(), tf=$("#fTrade").value;
+  const q=$("#q").value.trim().toLowerCase(), tf=$("#fTrade").value, of=$("#fOriginator").value;
   let v=STATE.trackers.slice();
   if(tf) v=v.filter(t=>t.trade===tf);
-  if(q) v=v.filter(t=>[t.reqNumber,t.project,t.description,t.trade].some(x=>String(x||"").toLowerCase().includes(q)));
+  if(of) v=v.filter(t=>trackerOriginator(t)===of);
+  if(q) v=v.filter(t=>[t.reqNumber,t.project,t.description,t.trade,trackerOriginator(t)].some(x=>String(x||"").toLowerCase().includes(q)));
   return v;
+}
+/* Populate the originator filter from the distinct originators in the current list. */
+function fillOriginatorFilter(){
+  const sel=$("#fOriginator"); if(!sel) return;
+  const cur=sel.value;
+  const names=[...new Set(STATE.trackers.map(trackerOriginator).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  sel.innerHTML='<option value="">All originators</option>'+names.map(n=>'<option value="'+esc(n)+'"'+(n===cur?' selected':'')+'>'+esc(n)+'</option>').join("");
+  if(names.includes(cur)) sel.value=cur; else sel.value="";
 }
 /* Branded, print-optimized pickup sheet for one tracker (new window → print). */
 function printSheet(t){
@@ -628,6 +651,7 @@ function updatePurgeBtn(){
 }
 function render(){
   updatePurgeBtn();
+  fillOriginatorFilter();
   const list=$("#list"), empty=$("#empty"), v=viewTrackers();
   if(!STATE.trackers.length){
     list.innerHTML=""; empty.style.display="block"; renderPager(0,1,0,0);
@@ -676,9 +700,15 @@ function renderTracker(t){
   const overBadge = (!isDone && trackerOverdue(t)) ? ' <span class="badge over">Overdue</span>' : '';
   const doneBadge = isDone ? ' <span class="badge done">Completed</span>' : '';
   const completeBtn = (STATE.admin && !isDone) ? '<button class="btn small secondary" data-complete="'+t.issue+'">Mark complete</button>' : '';
+  const orig = trackerOriginator(t);
+  const tradeOpts = TRADES.concat(TRADES.includes(t.trade)?[]:[t.trade]).map(tr=>'<option value="'+esc(tr)+'"'+(tr===t.trade?' selected':'')+'>'+esc(tr)+'</option>').join("");
+  const tradeCtl = STATE.admin
+    ? '<select class="trkTrade" data-issue="'+t.issue+'" aria-label="Trade">'+tradeOpts+'</select>'
+    : '<span class="badge">'+esc(t.trade)+'</span>';
+  const origMeta = orig ? '<span class="meta orig">By '+esc(orig)+'</span>' : '';
   return '<div class="trk'+(isDone?' done':'')+'" data-issue="'+t.issue+'">'+
-    '<div class="top" data-toggle="'+t.issue+'"><span class="req">Req '+esc(t.reqNumber)+'</span> <span class="badge">'+esc(t.trade)+'</span>'+overBadge+doneBadge+' '+
-      (t.project?'<span class="meta">'+esc(t.project)+'</span>':'')+
+    '<div class="top" data-toggle="'+t.issue+'"><span class="req">Req '+esc(t.reqNumber)+'</span> '+tradeCtl+overBadge+doneBadge+' '+
+      (t.project?'<span class="meta">'+esc(t.project)+'</span>':'')+origMeta+
       '<span class="prog"><span class="lines">'+t.linesComplete+'/'+t.linesTotal+' picked up</span>'+ringSvg(pct)+'</span>'+completeBtn+'</div>'+
     '<div class="detail"><div class="table-scroll"><table><thead><tr><th>Line</th><th>Part #</th><th>Description</th><th>UoM</th><th>Required</th><th>Delivered</th><th>Picked up</th><th>Picked up by</th><th>Status</th>'+adminHead+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
       '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">'+
@@ -771,6 +801,7 @@ function bind(){
   });
   $("#q").addEventListener("input", ()=>{ STATE.page=1; render(); });
   $("#fTrade").addEventListener("change", ()=>{ STATE.page=1; render(); });
+  $("#fOriginator").addEventListener("change", ()=>{ STATE.page=1; render(); });
   $("#segActive").addEventListener("click", async ()=>{ STATE.state="open"; STATE.page=1; $("#segActive").setAttribute("aria-selected","true"); $("#segDone").setAttribute("aria-selected","false"); await loadTrackers(); render(); });
   $("#segDone").addEventListener("click", async ()=>{ STATE.state="closed"; STATE.page=1; $("#segDone").setAttribute("aria-selected","true"); $("#segActive").setAttribute("aria-selected","false"); await loadTrackers(); render(); });
   $("#pgPrev").addEventListener("click", ()=>{ if(STATE.page>1) gotoPage(STATE.page-1); });
@@ -788,7 +819,19 @@ function bind(){
     $("#purgeLegacy").disabled=false; invalidateCache(); render();
     toast("Purged "+ok+(fail?(" · "+fail+" failed"):""));
   });
+  $("#list").addEventListener("change", async e=>{
+    const sel=e.target.closest(".trkTrade"); if(!sel) return;
+    const issue=parseInt(sel.getAttribute("data-issue"),10), trade=sel.value;
+    sel.disabled=true;
+    try{ toast("Updating trade…"); const res=await setTradeReq(issue, trade);
+      const idx=STATE.trackers.findIndex(t=>t.issue===issue);
+      if(idx>=0 && res.tracker) STATE.trackers[idx]=res.tracker;
+      invalidateCache(); toast("Trade updated"); render();
+    }catch(err){ sel.disabled=false; toast("Failed: "+err.message);
+      const idx=STATE.trackers.findIndex(t=>t.issue===issue); if(idx>=0) sel.value=STATE.trackers[idx].trade; }
+  });
   $("#list").addEventListener("click", async e=>{
+    if(e.target.closest(".trkTrade")) return;   // let the trade editor handle its own clicks (don't toggle)
     const cmp=e.target.closest("[data-complete]");
     if(cmp){
       const issue=parseInt(cmp.getAttribute("data-complete"),10);

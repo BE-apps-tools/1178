@@ -447,13 +447,12 @@ function renderPreview(){
   const dupes=orders.filter(orderExists).length;
   const excluded=orders.filter(o=>!orderExists(o)&&o.excluded).length;
   const rows=orders.map((o,i)=>{
-    const dup=orderExists(o);
+    if(orderExists(o)) return "";   // hide already-tracked orders from the list (still counted in the summary)
     const linesTbl='<div class="ord-lines"><table><thead><tr><th>Line</th><th>Part #</th><th>Description</th><th>UoM</th><th>Required</th></tr></thead><tbody>'+
       o.lines.map(l=>'<tr><td>'+esc(l.line)+'</td><td>'+esc(l.part||"")+'</td><td>'+esc(l.desc)+'</td><td>'+esc(l.uom||"")+'</td><td>'+esc(l.requiredDate||"")+'</td></tr>').join("")+
       '</tbody></table></div>';
     let controls, cls;
-    if(dup){ controls='<span class="badge">Already tracked · skipped</span>'; cls=' dupe'; }
-    else if(o.excluded){ controls='<span class="badge">Excluded</span><button type="button" class="ord-ex" data-exclude="'+i+'">Include</button>'; cls=' excluded'; }
+    if(o.excluded){ controls='<span class="badge">Excluded</span><button type="button" class="ord-ex" data-exclude="'+i+'">Include</button>'; cls=' excluded'; }
     else { controls=ordTradeSelect(i, o.trade)+'<button type="button" class="ord-ex" data-exclude="'+i+'">Exclude</button>'; cls=(o.trade?' ready':''); }
     return '<div class="ordrow'+cls+'" data-row="'+i+'">'+
       '<div class="ord-head">'+

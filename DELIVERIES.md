@@ -29,8 +29,10 @@ Live at the **Deliveries** card on the portal hub → `deliveries.html`.
      **Exclude** button — excluded orders are dropped from the count and not
      created (click **Include** to bring one back).
    - Orders whose Req # is **already tracked** (open or closed) are auto-detected
-     and badged **"Already tracked · skipped"** so the same order is never added
-     twice. (Rows sharing one Order Number are also merged into a single tracker.)
+     and **hidden from the list** (they're counted as "already tracked (skipped)"
+     in the summary line), so you only scroll through the **new** orders to add
+     and the same order is never added twice. (Rows sharing one Order Number are
+     also merged into a single tracker.)
    Then **Create N trackers** — each remaining order becomes its own tracker in
    **Active**.
 

@@ -45,6 +45,10 @@ Each line captures two events, which happen at different times:
    Partial pickup → Picked up**. When **every line is fully picked up**, the
    tracker **auto-closes** to the **Completed** tab. Date + your name are recorded
    automatically on each event.
+5. **Mark complete (admin):** when the Req export doesn't include every already-
+   handled line, the order won't auto-close. Click **Mark complete** on the order
+   header to close it manually — it moves to **Completed** (shown with a green
+   accent and a "Completed" badge). The GitHub Issue is closed as `completed`.
 
 ## Team view (everyone)
 - Open **Deliveries** (no unlock). Browse **Active** trackers; switch to

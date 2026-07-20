@@ -47,9 +47,11 @@ Live at the **Deliveries** card on the portal hub → `deliveries.html`.
 ## Log deliveries & pickups (updater)
 Each line captures two events, which happen at different times:
 1. Click a tracker to expand its lines.
-2. **Expected qty (admin, optional)** — the Req export often omits the expected
-   quantity, so enter it manually on the *Expected* row and click **Set**. The
-   line then shows **Pending = Expected − Delivered** (0 when fully delivered).
+2. **Expected qty (admin)** — when the export includes a **Quantity To Receive**,
+   it **prefills Expected** on import; when it's blank, enter it manually on the
+   *Expected* row and click **Set**. The line then shows
+   **Pending = Expected − Delivered** (0 when fully delivered). (Unit cost is
+   never read.)
 3. **Deliver** — when material arrives on site, enter the **quantity delivered**
    and click **Log** on the *Deliver* row.
 4. **Pickup** — when the team takes material, enter the **quantity picked up** and
@@ -85,6 +87,9 @@ Each line captures two events, which happen at different times:
   is instant after the first load (each tab is cached until you make a change).
 
 ## Corrections
+- **Fix a mistyped pickup qty (admin):** expand the tracker, click **Edit** next
+  to the pickup entry under *Picked up by*, correct the number, and **Save**
+  (it asks you to confirm) — the picked-up total updates in place.
 - Logged too much/little? Log an **adjusting** delivery or pickup on that line (a
   negative quantity subtracts). To remove a whole tracker, expand it and click
   **Delete order** (admin) — it leaves the app and its GitHub Issue is closed

@@ -172,6 +172,15 @@
   .logcell .btn{flex:0 0 auto;}
   .logcell .evlbl{font-size:9px;font-weight:bold;text-transform:uppercase;letter-spacing:0.04em;color:var(--medium-gray);width:52px;flex:0 0 52px;}
   .pickedby{font-size:11px;color:var(--medium-gray);}
+  .pk{margin-bottom:4px;} .pk:last-child{margin-bottom:0;}
+  .pk-edit{background:none;border:none;color:var(--energy-blue);font-family:'Arial Black', Arial, sans-serif;text-transform:uppercase;font-size:9px;letter-spacing:0.04em;cursor:pointer;padding:0 2px;}
+  .pk-edit:hover{color:var(--dark-blue);}
+  .pk-form{display:none;align-items:center;gap:4px;white-space:nowrap;}
+  .pk.editing .pk-view{display:none;} .pk.editing .pk-form{display:inline-flex;}
+  .pk-form input{width:56px;padding:4px 6px;font-size:12px;}
+  .pk-save,.pk-cancel{font-family:'Arial Black', Arial, sans-serif;text-transform:uppercase;font-size:9px;letter-spacing:0.04em;border-radius:var(--r-sm);padding:5px 9px;cursor:pointer;}
+  .pk-save{background:var(--dark-blue);color:var(--white);border:1px solid var(--dark-blue);}
+  .pk-cancel{background:var(--white);color:var(--dark-blue);border:1px solid var(--light-gray);}
 
   .empty{padding:44px 20px;text-align:center;color:var(--medium-gray);background:var(--white);border:1px solid var(--light-gray);border-radius:var(--r);box-shadow:var(--shadow);}
   .empty .big{font-family:'Arial Black', Arial, sans-serif;text-transform:uppercase;color:var(--light-gray);font-size:18px;margin-bottom:6px;}
@@ -381,7 +390,7 @@ function sheetRows(xml, shared){
    Everything else is ignored; no ordered quantity is captured. */
 const REQ_COLS = { order:"Order Number", line:"Line Number", desc:"Line Description",
   part:"2nd Item Number", uom:"UM", reqDate:"Request Date", desc2:"Description Line 2",
-  originator:"Transaction Originator" };
+  originator:"Transaction Originator", qty:"Quantity To Receive" };   /* qty -> Expected; never read Unit Cost */
 function firstSheetPath(wb, relMap){
   const m=/<sheet\s+[^>]*r:id="([^"]+)"/.exec(wb);
   if(!m) throw new Error("No sheet found in workbook");
@@ -407,7 +416,7 @@ async function parseReqXlsx(file){
   if(iOrder<0) throw new Error('Header "'+REQ_COLS.order+'" not found. Headers: '+(hdrRaw.filter(Boolean).join(", ")||"(none)"));
   const iLine=col(REQ_COLS.line), iDesc=col(REQ_COLS.desc), iPart=col(REQ_COLS.part),
         iUom=col(REQ_COLS.uom), iReq=col(REQ_COLS.reqDate), iD2=col(REQ_COLS.desc2),
-        iOrig=col(REQ_COLS.originator);
+        iOrig=col(REQ_COLS.originator), iQty=col(REQ_COLS.qty);
   const byOrder=new Map(), byOrig=new Map();
   for(let r=1;r<rows.length;r++){
     const row=rows[r];
@@ -417,9 +426,11 @@ async function parseReqXlsx(file){
     const d2=iD2>=0?String(row[iD2]||"").trim():"";
     const part=iPart>=0?String(row[iPart]||"").trim():"";
     const lnRaw=iLine>=0?cleanNum(row[iLine]):"";
+    const qRaw=iQty>=0?cleanNum(row[iQty]):"";
     const line={ line: lnRaw!==""?(parseInt(lnRaw,10)||lnRaw):"", part,
       desc:d1+(d2?(" "+d2):""), uom:iUom>=0?String(row[iUom]||"").trim():"",
-      requiredDate:iReq>=0?excelSerialToISO(row[iReq]):"" };
+      requiredDate:iReq>=0?excelSerialToISO(row[iReq]):"",
+      expected:(qRaw!=="" && isFinite(Number(qRaw)))?Number(qRaw):null };   /* prefill Expected from the file when present */
     if(!line.desc && !part && line.line==="") continue;
     const orig=iOrig>=0?String(row[iOrig]||"").trim():"";
     if(orig && !byOrig.get(order)) byOrig.set(order, orig);   // first non-empty originator per order
@@ -490,8 +501,8 @@ function renderPreview(){
   const excluded=orders.filter(o=>!orderExists(o)&&o.excluded).length;
   const rows=orders.map((o,i)=>{
     if(orderExists(o)) return "";   // hide already-tracked orders from the list (still counted in the summary)
-    const linesTbl='<div class="ord-lines"><table><thead><tr><th>Line</th><th>Part #</th><th>Description</th><th>UoM</th><th>Required</th></tr></thead><tbody>'+
-      o.lines.map(l=>'<tr><td>'+esc(l.line)+'</td><td>'+esc(l.part||"")+'</td><td>'+esc(l.desc)+'</td><td>'+esc(l.uom||"")+'</td><td>'+esc(l.requiredDate||"")+'</td></tr>').join("")+
+    const linesTbl='<div class="ord-lines"><table><thead><tr><th>Line</th><th>Part #</th><th>Description</th><th>UoM</th><th>Required</th><th>Expected</th></tr></thead><tbody>'+
+      o.lines.map(l=>'<tr><td>'+esc(l.line)+'</td><td>'+esc(l.part||"")+'</td><td>'+esc(l.desc)+'</td><td>'+esc(l.uom||"")+'</td><td>'+esc(l.requiredDate||"")+'</td><td>'+(l.expected==null?"—":esc(l.expected))+'</td></tr>').join("")+
       '</tbody></table></div>';
     let controls, cls;
     if(o.excluded){ controls='<span class="badge">Excluded</span><button type="button" class="ord-ex" data-exclude="'+i+'">Include</button>'; cls=' excluded'; }
@@ -560,6 +571,12 @@ async function loadTrackers(force){
 async function logEvent(issue, line, kind, qty, by){
   const r=await fetch(wbase()+"/req/deliver",{method:"POST",headers:{"Content-Type":"application/json","x-admin-key":adminKey()},
     body:JSON.stringify({issue, line, kind, qty:Number(qty), by:by||"", loggedBy:STATE.adminName})});
+  if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
+  return await r.json();
+}
+async function editPickup(issue, line, index, qty){
+  const r=await fetch(wbase()+"/req/deliver",{method:"POST",headers:{"Content-Type":"application/json","x-admin-key":adminKey()},
+    body:JSON.stringify({issue, line, kind:"editpickup", index, qty:Number(qty), loggedBy:STATE.adminName})});
   if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
   return await r.json();
 }
@@ -737,7 +754,15 @@ function renderTracker(t){
   const pct=t.linesTotal?Math.round(100*t.linesComplete/t.linesTotal):0;
   const rows=((t.marker&&t.marker.lines)||[]).map(l=>{
     const d=lineDelivered(l), p=linePickedUp(l), st=lineStatus(d,p), lp=linePickPct(d,p), e=lineExpected(l), pend=linePending(l);
-    const pb=(l.pickups||[]).map(x=>esc(x.by||"")+" ("+esc(x.qty)+(x.date?(" · "+esc(x.date)):"")+")").filter(Boolean).join("<br>");
+    const canEditPk = STATE.admin && STATE.state==="open";
+    const pb=(l.pickups||[]).map((x,xi)=>{
+      const label=esc(x.by||"")+" ("+esc(x.qty)+(x.date?(" · "+esc(x.date)):"")+")";
+      if(!canEditPk) return '<div class="pkline">'+label+'</div>';
+      return '<div class="pk" data-pk="'+t.issue+'|'+esc(l.line)+'|'+xi+'">'+
+        '<span class="pk-view">'+label+' <button type="button" class="pk-edit">Edit</button></span>'+
+        '<span class="pk-form"><input class="pk-q" type="text" inputmode="decimal" value="'+esc(x.qty)+'"><button type="button" class="pk-save">Save</button><button type="button" class="pk-cancel">Cancel</button></span>'+
+      '</div>';
+    }).join("");
     const meter='<div class="lmeter'+(st==="Picked up"?" done":"")+'"><span data-w="'+lp+'"></span></div>';
     const admin = STATE.admin && STATE.state==="open"
       ? '<td class="logcell">'+
@@ -927,6 +952,26 @@ function bind(){
   });
   $("#list").addEventListener("click", async e=>{
     if(e.target.closest(".trkTrade")) return;   // let the trade editor handle its own clicks (don't toggle)
+    // ----- correct a picked-up qty (intentional: Edit -> change -> Save) -----
+    const pkEdit=e.target.closest(".pk-edit");
+    if(pkEdit){ const pk=pkEdit.closest(".pk"); pk.classList.add("editing"); const q=pk.querySelector(".pk-q"); q.focus(); q.select(); return; }
+    const pkCancel=e.target.closest(".pk-cancel");
+    if(pkCancel){ pkCancel.closest(".pk").classList.remove("editing"); return; }
+    const pkSave=e.target.closest(".pk-save");
+    if(pkSave){
+      const pk=pkSave.closest(".pk"); const [issue,line,idx]=pk.getAttribute("data-pk").split("|");
+      const q=pk.querySelector(".pk-q").value.trim();
+      if(q===""||!isFinite(Number(q))||Number(q)===0){ toast("Enter a corrected quantity"); return; }
+      if(!window.confirm("Update this picked-up quantity to "+q+"?")) return;
+      try{ toast("Updating…");
+        const res=await editPickup(parseInt(issue,10), line, parseInt(idx,10), Number(q));
+        const i=STATE.trackers.findIndex(t=>t.issue===parseInt(issue,10)); invalidateCache();
+        if(res.complete){ if(i>=0) STATE.trackers.splice(i,1); toast("Updated — tracker complete"); render(); }
+        else { if(i>=0 && res.tracker) STATE.trackers[i]=res.tracker; toast("Pickup qty updated"); render();
+          const card=document.querySelector('.trk[data-issue="'+issue+'"]'); if(card) card.classList.add("open"); }
+      }catch(err){ toast("Failed: "+err.message); }
+      return;
+    }
     const cmp=e.target.closest("[data-complete]");
     if(cmp){
       const issue=parseInt(cmp.getAttribute("data-complete"),10);

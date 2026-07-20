@@ -7,7 +7,8 @@
  * Requisition delivery trackers:
  *   POST /req        -> ADMIN: create a req-tracker Issue from a parsed Req.
  *   GET  /reqs       -> list trackers (?state=open|closed), cached ~60s.
- *   POST /req/deliver-> ADMIN: log a delivered/pickup event on a line.
+ *   POST /req/deliver-> ADMIN: log delivered/pickup, set expected qty, or
+ *                       correct a pickup qty (kind: delivered|pickup|expected|editpickup).
  *   POST /req/delete -> ADMIN: remove a tracker (close issue, drop req-tracker label).
  *   POST /req/complete -> ADMIN: manually mark a tracker complete (close, keep label).
  *   POST /req/trade  -> ADMIN: change a tracker's trade (title/body/label rewrite);
@@ -225,7 +226,7 @@ async function postDeliver(req, env, h){
   let b; try { b = await req.json(); } catch { return json({ error: "bad json" }, 400, h); }
   const issue = parseInt(b.issue, 10);
   const qty = Number(b.qty);
-  const kind = b.kind === "pickup" ? "pickup" : (b.kind === "expected" ? "expected" : "delivered");
+  const kind = b.kind === "pickup" ? "pickup" : (b.kind === "expected" ? "expected" : (b.kind === "editpickup" ? "editpickup" : "delivered"));
   if (!issue || b.line == null || !isFinite(qty)) return json({ error: "missing fields" }, 400, h);
   if (kind !== "expected" && qty === 0) return json({ error: "missing fields" }, 400, h);
   if (kind === "expected" && qty < 0) return json({ error: "bad qty" }, 400, h);
@@ -243,6 +244,11 @@ async function postDeliver(req, env, h){
   if (kind === "pickup"){
     line.pickups = line.pickups || [];
     line.pickups.push({ qty, by: String(b.by || "").trim(), date, loggedBy });
+  } else if (kind === "editpickup"){
+    const idx = parseInt(b.index, 10);
+    const pk = (line.pickups || [])[idx];
+    if (!pk) return json({ error: "no such pickup" }, 400, h);
+    pk.qty = qty;   // correct a mistyped picked-up quantity in place
   } else if (kind === "expected"){
     line.expected = qty;   // manual expected qty (absolute; export often omits it)
   } else {

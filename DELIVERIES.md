@@ -65,9 +65,8 @@ Each line captures two events, which happen at different times:
   **Completed** for history. **Search** by Req #/trade/originator. Click
   **Filters** (it shows a count when active) to open a compact filter bar —
   filter by **Trade**, **Originator** (the Req's *Transaction Originator*, shown
-  as "By NAME"), and **Required** date — preset (Overdue / Due today / Due within
-  7 / Due within 30), a one-click **Today**, or an exact **From / To** range —
-  then **Clear filters** to reset. Expand any tracker to see, per line: Part #,
+  as "By NAME"), and **Date** — a one-click **Today** or an exact **From / To**
+  required-date range — then **Clear filters** to reset. Expand any tracker to see, per line: Part #,
   description, **Required** date, **Delivered**, **Picked up**, **Picked up by**,
   and status.
 - **Change a trade (admin):** each tracker header has a **Trade** dropdown — pick

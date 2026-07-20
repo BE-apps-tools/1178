@@ -615,6 +615,21 @@ async function editPickup(issue, line, index, qty){
   if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
   return await r.json();
 }
+/* Correct the Expected value (absolute set — same as the old "Set" control). */
+async function editExpected(issue, line, qty){
+  const r=await fetch(wbase()+"/req/deliver",{method:"POST",headers:{"Content-Type":"application/json","x-admin-key":adminKey()},
+    body:JSON.stringify({issue, line, kind:"expected", qty:Number(qty), loggedBy:STATE.adminName})});
+  if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
+  return await r.json();
+}
+/* Correct the Delivered total by logging the adjusting difference (uses the
+   existing "delivered" action, so no Worker change is needed). */
+async function adjustDelivered(issue, line, delta){
+  const r=await fetch(wbase()+"/req/deliver",{method:"POST",headers:{"Content-Type":"application/json","x-admin-key":adminKey()},
+    body:JSON.stringify({issue, line, kind:"delivered", qty:Number(delta), loggedBy:STATE.adminName})});
+  if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
+  return await r.json();
+}
 async function deleteReq(issue){
   const r=await fetch(wbase()+"/req/delete",{method:"POST",headers:{"Content-Type":"application/json","x-admin-key":adminKey()},
     body:JSON.stringify({issue})});
@@ -801,17 +816,25 @@ function renderTracker(t){
     const meter='<div class="lmeter'+(st==="Picked up"?" done":"")+'"><span data-w="'+lp+'"></span></div>';
     const admin = STATE.admin && STATE.state==="open"
       ? '<td class="logcell">'+
-          '<div class="ev"><span class="evlbl">Expected</span><input class="exqty" type="text" inputmode="decimal" style="width:64px" placeholder="qty" value="'+(e==null?"":esc(e))+'"><button class="btn small" data-ev="expected|'+t.issue+'|'+esc(l.line)+'">Set</button></div>'+
           '<div class="ev"><span class="evlbl">Deliver</span><input class="dqty" type="text" inputmode="decimal" style="width:64px" placeholder="qty"><button class="btn small" data-ev="delivered|'+t.issue+'|'+esc(l.line)+'">Log</button></div>'+
           '<div class="ev"><span class="evlbl">Pickup</span><input class="pqty" type="text" inputmode="decimal" style="width:64px" placeholder="qty"><input class="pby" type="text" style="width:92px" placeholder="picked up by"><button class="btn small" data-ev="pickup|'+t.issue+'|'+esc(l.line)+'">Log</button></div>'+
         '</td>'
       : '';
+    // Intentional inline edit (Edit -> change -> Save), same pattern as pickup entries.
+    const editChip=(attr, disp, val)=>
+      '<div class="pk" '+attr+'><span class="pk-view">'+disp+' <button type="button" class="pk-edit">Edit</button></span>'+
+      '<span class="pk-form"><input class="pk-q" type="text" inputmode="decimal" value="'+val+'"><button type="button" class="pk-save">Save</button><button type="button" class="pk-cancel">Cancel</button></span></div>';
     const ov=lineOverdue(l), ds=lineDueSoon(l);
     const reqCell='<td class="'+(ov?"rd-over":(ds?"rd-soon":""))+'">'+esc(l.requiredDate||"")+
       (ov?'<span class="rd-tag">Overdue</span>':(ds?'<span class="rd-tag soon">Due soon</span>':''))+'</td>';
-    const expCell='<td>'+(e==null?"—":esc(e))+'</td>';
+    const expCell='<td>'+(canEditPk
+      ? editChip('data-ex="'+t.issue+'|'+esc(l.line)+'"', (e==null?"—":esc(e)), (e==null?"":esc(e)))
+      : (e==null?"—":esc(e)))+'</td>';
+    const delCell='<td>'+(canEditPk
+      ? editChip('data-de="'+t.issue+'|'+esc(l.line)+'" data-cur="'+esc(d)+'"', esc(d), esc(d))
+      : esc(d))+'</td>';
     const pendCell='<td'+((pend!=null&&pend>0)?' class="rd-over"':'')+'>'+(pend==null?"—":esc(pend))+'</td>';
-    return '<tr><td>'+esc(l.line)+'</td><td>'+esc(l.part||"")+'</td><td>'+esc(l.desc)+'</td><td>'+esc(l.uom)+'</td>'+reqCell+expCell+'<td>'+esc(d)+'</td>'+pendCell+'<td>'+esc(p)+meter+'</td><td class="meta pickedby">'+pb+'</td><td class="'+statusClass(st)+'">'+st+'</td>'+admin+'</tr>';
+    return '<tr><td>'+esc(l.line)+'</td><td>'+esc(l.part||"")+'</td><td>'+esc(l.desc)+'</td><td>'+esc(l.uom)+'</td>'+reqCell+expCell+delCell+pendCell+'<td>'+esc(p)+meter+'</td><td class="meta pickedby">'+pb+'</td><td class="'+statusClass(st)+'">'+st+'</td>'+admin+'</tr>';
   }).join("");
   const adminHead = STATE.admin && STATE.state==="open" ? '<th>Log delivery / pickup</th>' : '';
   const isDone = STATE.state==="closed";
@@ -995,17 +1018,44 @@ function bind(){
     if(pkCancel){ pkCancel.closest(".pk").classList.remove("editing"); return; }
     const pkSave=e.target.closest(".pk-save");
     if(pkSave){
-      const pk=pkSave.closest(".pk"); const [issue,line,idx]=pk.getAttribute("data-pk").split("|");
+      const pk=pkSave.closest(".pk");
       const q=pk.querySelector(".pk-q").value.trim();
-      if(q===""||!isFinite(Number(q))||Number(q)===0){ toast("Enter a corrected quantity"); return; }
-      if(!window.confirm("Update this picked-up quantity to "+q+"?")) return;
-      try{ toast("Updating…");
-        const res=await editPickup(parseInt(issue,10), line, parseInt(idx,10), Number(q));
+      const applyResult=(res, issue, okMsg)=>{
         const i=STATE.trackers.findIndex(t=>t.issue===parseInt(issue,10)); invalidateCache();
         if(res.complete){ if(i>=0) STATE.trackers.splice(i,1); toast("Updated — tracker complete"); render(); }
-        else { if(i>=0 && res.tracker) STATE.trackers[i]=res.tracker; toast("Pickup qty updated"); render();
+        else { if(i>=0 && res.tracker) STATE.trackers[i]=res.tracker; toast(okMsg); render();
           const card=document.querySelector('.trk[data-issue="'+issue+'"]'); if(card) card.classList.add("open"); }
-      }catch(err){ toast("Failed: "+err.message); }
+      };
+      // 1) pickup entry qty
+      if(pk.hasAttribute("data-pk")){
+        const [issue,line,idx]=pk.getAttribute("data-pk").split("|");
+        if(q===""||!isFinite(Number(q))||Number(q)===0){ toast("Enter a corrected quantity"); return; }
+        if(!window.confirm("Update this picked-up quantity to "+q+"?")) return;
+        try{ toast("Updating…"); applyResult(await editPickup(parseInt(issue,10), line, parseInt(idx,10), Number(q)), issue, "Pickup qty updated"); }
+        catch(err){ toast("Failed: "+err.message); }
+        return;
+      }
+      // 2) expected value (absolute)
+      if(pk.hasAttribute("data-ex")){
+        const [issue,line]=pk.getAttribute("data-ex").split("|");
+        if(q===""||!isFinite(Number(q))||Number(q)<0){ toast("Enter a valid expected quantity"); return; }
+        if(!window.confirm("Set Expected to "+q+"?")) return;
+        try{ toast("Updating…"); applyResult(await editExpected(parseInt(issue,10), line, Number(q)), issue, "Expected updated"); }
+        catch(err){ toast("Failed: "+err.message); }
+        return;
+      }
+      // 3) delivered total (applied as the adjusting difference)
+      if(pk.hasAttribute("data-de")){
+        const [issue,line]=pk.getAttribute("data-de").split("|");
+        const cur=Number(pk.getAttribute("data-cur")||"0");
+        if(q===""||!isFinite(Number(q))||Number(q)<0){ toast("Enter a valid delivered quantity"); return; }
+        const target=Number(q), delta=target-cur;
+        if(delta===0){ pk.classList.remove("editing"); return; }
+        if(!window.confirm("Set Delivered to "+target+"?")) return;
+        try{ toast("Updating…"); applyResult(await adjustDelivered(parseInt(issue,10), line, delta), issue, "Delivered updated"); }
+        catch(err){ toast("Failed: "+err.message); }
+        return;
+      }
       return;
     }
     const cmp=e.target.closest("[data-complete]");

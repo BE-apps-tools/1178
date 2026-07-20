@@ -128,6 +128,8 @@ export default {
       return listAdmins(req, env, h);
     } else if (path === "/admins" && req.method === "POST"){
       return postAdmins(req, env, h);
+    } else if (path === "/access" && req.method === "POST"){
+      return postAccess(req, env, h);
     } else if (path === "/health" && req.method === "GET"){
       return health(env, h);
     }
@@ -519,6 +521,39 @@ async function postAdmins(req, env, h){
   if (!pr.ok) { const t = await pr.text(); return json({ error: "github " + pr.status, detail: t.slice(0, 300) }, 502, h); }
   _adminsCache = { at: 0, admins: null };   // invalidate so the change is live immediately
   return json({ ok: true, admins: admins.map(a => ({ name: a.name, added: a.added || "" })) }, 200, h);
+}
+
+/* ============================ optional view-only access gate ============================
+ * POST /access — ADMIN: turn the front-end view gate on/off. Body:
+ *   { action:"set", key }   -> require a view key (stored hashed in data/access.json)
+ *   { action:"clear" }      -> make the portal public again
+ * The pages read data/access.json (public static file) and prompt for the key
+ * when present. NOTE: the repo is public, so this is a deterrent for casual
+ * link-holders, not true confidentiality — the raw data stays readable on GitHub. */
+async function postAccess(req, env, h){
+  if (!(await checkAdmin(req, env)).ok) return json({ error: "admin only" }, 401, h);
+  let b; try { b = await req.json(); } catch { return json({ error: "bad json" }, 400, h); }
+  const action = b.action === "clear" ? "clear" : "set";
+  let view = null;
+  if (action === "set"){
+    const key = String(b.key || "").trim();
+    if (key.length < 4) return json({ error: "key too short" }, 400, h);
+    const salt = randomHex(16);
+    view = { salt, hash: await sha256hex(salt + ":" + key) };
+  }
+  // read current file for its sha
+  let sha = null;
+  const gr = await fetch(`https://api.github.com/repos/${env.GH_REPO}/contents/data/access.json`, { headers: ghHeaders(env) });
+  if (gr.ok){ sha = (await gr.json()).sha; }
+  else if (gr.status !== 404){ return json({ error: "github " + gr.status }, 502, h); }
+  const put = { message: `Site access: ${action === "set" ? "require view key" : "make public"} [portal]`,
+    content: b64encode(JSON.stringify({ view }, null, 2) + "\n") };
+  if (sha) put.sha = sha;
+  const pr = await fetch(`https://api.github.com/repos/${env.GH_REPO}/contents/data/access.json`, {
+    method: "PUT", headers: { ...ghHeaders(env), "Content-Type": "application/json" }, body: JSON.stringify(put),
+  });
+  if (!pr.ok) { const t = await pr.text(); return json({ error: "github " + pr.status, detail: t.slice(0, 300) }, 502, h); }
+  return json({ ok: true, required: !!view }, 200, h);
 }
 
 /* ============================ health (config diagnostics; no secrets exposed) ============================ */

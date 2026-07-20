@@ -28,7 +28,7 @@
   /* ---------- App shell ---------- */
   .app-shell{display:flex;min-height:100vh;align-items:stretch;}
   .nav-rail{flex:0 0 var(--rail-w);width:var(--rail-w);background:var(--dark-blue);color:var(--white);
-    display:flex;flex-direction:column;align-items:stretch;padding:16px 8px 14px;position:sticky;top:0;height:100vh;
+    display:flex;flex-direction:column;align-items:stretch;padding:16px 8px 14px;min-height:100vh;
     animation:railIn .3s ease both;}
   .rail-logo{display:block;width:46px;height:46px;margin:0 auto 22px;}
   .rail-logo svg{width:100%;height:100%;display:block;}
@@ -177,7 +177,7 @@
   @media (max-width:820px){
     :root{--rail-w:100%;}
     .app-shell{flex-direction:column;}
-    .nav-rail{flex-direction:row;height:auto;position:static;padding:8px;align-items:center;gap:6px;}
+    .nav-rail{flex-direction:row;height:auto;min-height:0;position:static;padding:8px;align-items:center;gap:6px;}
     .rail-logo{margin:0 8px 0 4px;width:38px;height:38px;flex:0 0 38px;}
     .rail-item{flex:1;margin-bottom:0;padding:8px 4px;}
     .rail-ic{width:18px;height:18px;margin:0 auto 4px;}
@@ -238,6 +238,7 @@
       </div>
       <div class="grid" id="adminZone"></div>
       <div id="teamWrap"></div>
+      <div id="accessWrap"></div>
 
       <section id="guideSection" class="guide-sec" hidden aria-label="Admin guide">
         <h2>Admin guide</h2>
@@ -364,7 +365,11 @@ const wbase = () => WORKER_URL.replace(/\/$/,"");
 /* Admin sign-in shares localStorage with inventory.html + deliveries.html (same origin). */
 function adminKey(){ return localStorage.getItem("bac_admin_key")||""; }
 function adminName(){ return localStorage.getItem("bac_admin_name")||""; }
-function adminHeaders(){ return {"Content-Type":"application/json","x-admin-key":adminKey(),"x-admin-name":adminName()}; }
+/* Keep the header footprint minimal so CORS preflights stay simple: GETs send
+   only x-admin-key; POSTs add Content-Type. (No x-admin-name — the name isn't
+   needed server-side and an extra custom header can trip a stale preflight.) */
+function adminGetHeaders(){ return {"x-admin-key":adminKey()}; }
+function adminPostHeaders(){ return {"Content-Type":"application/json","x-admin-key":adminKey()}; }
 async function adminSignIn(){
   const n=prompt("Your name (shown on updates):"); if(n===null) return;
   const k=prompt("Admin key:"); if(k===null) return;
@@ -373,10 +378,10 @@ async function adminSignIn(){
   // Validate against the Worker (master key or a repo-listed admin) before storing.
   try{
     const r=await fetch(wbase()+"/admin/verify",{method:"POST",
-      headers:{"Content-Type":"application/json","x-admin-key":key,"x-admin-name":name}});
+      headers:{"Content-Type":"application/json","x-admin-key":key}});
     const d=await r.json().catch(()=>({}));
     if(!d.ok){ alert("That admin key wasn't recognized. Check the key (or ask an admin to add you under Team access)."); return; }
-    localStorage.setItem("bac_admin_name", d.name||name);   // canonical name from the list
+    localStorage.setItem("bac_admin_name", (!d.master && d.name) ? d.name : name);   // repo admins use their listed name
     localStorage.setItem("bac_admin_key", key);
   }catch(e){
     alert("Couldn't reach the sign-in service. Check your connection and try again."); return;
@@ -395,12 +400,15 @@ async function loadTeam(){
   w.innerHTML='<div class="reqcard"><div class="card-head"><h3>Team access</h3></div><div class="rq-empty">Loading…</div></div>';
   let admins=[];
   try{
-    const r=await fetch(wbase()+"/admins",{headers:adminHeaders()});
+    const r=await fetch(wbase()+"/admins",{headers:adminGetHeaders()});
     if(!r.ok) throw new Error(r.status===401?"not authorized":("HTTP "+r.status));
     admins=(await r.json()).admins||[];
   }catch(e){
+    const hint = /fetch|network|load/i.test(e.message)
+      ? " — the Worker may need a moment or a redeploy. Hard-refresh (Ctrl/Cmd-Shift-R) and Retry."
+      : "";
     w.innerHTML='<div class="reqcard"><div class="card-head"><h3>Team access</h3><button class="rq-refresh" id="teamRetry">Retry</button></div>'+
-      '<div class="rq-empty">Couldn\'t load the admin list ('+esc(e.message)+').</div></div>';
+      '<div class="rq-empty">Couldn\'t load the admin list ('+esc(e.message)+')'+esc(hint)+'</div></div>';
     return;
   }
   renderTeam(admins);
@@ -424,7 +432,7 @@ async function addAdmin(){
   const name=n.trim(); if(!name){ alert("Enter a name."); return; }
   const key=newAdminKey();
   try{
-    const r=await fetch(wbase()+"/admins",{method:"POST",headers:adminHeaders(),
+    const r=await fetch(wbase()+"/admins",{method:"POST",headers:adminPostHeaders(),
       body:JSON.stringify({action:"add",name,key})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.ok){ alert("Couldn't add admin: "+esc((d&&d.error)||("HTTP "+r.status))); return; }
@@ -436,11 +444,57 @@ async function addAdmin(){
 async function removeAdmin(name){
   if(!window.confirm("Remove "+name+"? Their key stops working immediately.")) return;
   try{
-    const r=await fetch(wbase()+"/admins",{method:"POST",headers:adminHeaders(),
+    const r=await fetch(wbase()+"/admins",{method:"POST",headers:adminPostHeaders(),
       body:JSON.stringify({action:"remove",name})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.ok){ alert("Couldn't remove admin: "+esc((d&&d.error)||("HTTP "+r.status))); return; }
     loadTeam();
+  }catch(e){ alert("Couldn't reach the service. Try again."); }
+}
+
+/* ---------- Site access (optional view-only key; admin can require it or stay public) ---------- */
+async function loadAccess(){
+  const w=$("#accessWrap"); if(!w) return;
+  let required=false;
+  try{
+    const r=await fetch("data/access.json",{cache:"no-store"});
+    if(r.ok){ const c=await r.json(); required=!!(c&&c.view&&c.view.hash); }
+  }catch(e){}
+  renderAccess(required);
+}
+function renderAccess(required){
+  const state = required
+    ? '<strong>Key required</strong> <span class="muted">viewers must enter the access key</span>'
+    : '<strong>Public</strong> <span class="muted">anyone with the link can view</span>';
+  const btns = required
+    ? '<button class="rq-refresh" id="accChange">Change key</button> <button class="rq-remove" id="accPublic">Make public</button>'
+    : '<button class="rq-refresh" id="accSet">Require a view key</button>';
+  $("#accessWrap").innerHTML =
+    '<div class="reqcard"><div class="card-head"><h3>Site access</h3>'+btns+'</div>'+
+      '<div class="reqrow"><span class="rq-main"><strong>Status:</strong> '+state+'</span></div>'+
+      '<div class="rq-empty">Set a view key to require it before anyone can open the portal (admins are exempt on this device). Leave it public for open access. Changes take about a minute to apply.</div>'+
+    '</div>';
+}
+async function setViewKey(){
+  const k=prompt("Enter the view key everyone will use to open the portal (share it with your viewers):");
+  if(k===null) return;
+  const key=k.trim(); if(key.length<4){ alert("Use at least 4 characters."); return; }
+  try{
+    const r=await fetch(wbase()+"/access",{method:"POST",headers:adminPostHeaders(),body:JSON.stringify({action:"set",key})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok){ alert("Couldn't set the view key: "+esc((d&&d.error)||("HTTP "+r.status))); return; }
+    alert("View key set. It takes about a minute to apply for viewers.");
+    renderAccess(true);
+  }catch(e){ alert("Couldn't reach the service. Try again."); }
+}
+async function makePublic(){
+  if(!window.confirm("Make the portal public again? Anyone with the link will be able to view it.")) return;
+  try{
+    const r=await fetch(wbase()+"/access",{method:"POST",headers:adminPostHeaders(),body:JSON.stringify({action:"clear"})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok){ alert("Couldn't update: "+esc((d&&d.error)||("HTTP "+r.status))); return; }
+    alert("Portal is public again. Takes about a minute to apply.");
+    renderAccess(false);
   }catch(e){ alert("Couldn't reach the service. Try again."); }
 }
 
@@ -523,9 +577,11 @@ function renderAdmin(){
     $("#guideSection").hidden=true;                 // revealed via the Admin guide card
     $("#openReqsWrap").innerHTML=""; $("#openReqsWrap").dataset.open="";   // loaded via the Requests card
     loadTeam();
+    loadAccess();
   } else {
     who.classList.remove("show"); who.textContent="";
     $("#teamWrap").innerHTML="";
+    $("#accessWrap").innerHTML="";
     $("#guideSection").hidden=true;
     z.innerHTML =
       '<div class="card lock"><div class="accent-top"></div>' +
@@ -558,6 +614,10 @@ $("#teamWrap").addEventListener("click", e=>{
   if(e.target.closest("#addAdminBtn")) addAdmin();
   else if(e.target.closest("#teamRetry")) loadTeam();
   else { const rm=e.target.closest("[data-remove]"); if(rm) removeAdmin(rm.getAttribute("data-remove")); }
+});
+$("#accessWrap").addEventListener("click", e=>{
+  if(e.target.closest("#accSet")||e.target.closest("#accChange")) setViewKey();
+  else if(e.target.closest("#accPublic")) makePublic();
 });
 renderAdmin();
 </script>

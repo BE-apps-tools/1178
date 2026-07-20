@@ -56,7 +56,10 @@ def main():
     # Strip only the logo svg for the palette check, so chart-svg colors are
     # still validated against the palette.
     stripped = src.replace(logo_svgs[0], "", 1)
-    hexes = sorted({h.upper() for h in re.findall(r"#[0-9A-Fa-f]{3,8}", stripped)})
+    # Require a non-word boundary after the hex so JS/CSS identifiers that merely
+    # contain hex letters (e.g. the selector "#backfillBtn" -> "#bac") aren't
+    # mistaken for colors. Real colors are followed by ; ) " ' space } etc.
+    hexes = sorted({h.upper() for h in re.findall(r"#[0-9A-Fa-f]{3,8}(?![0-9A-Za-z])", stripped)})
     bad = [h for h in hexes if h not in ALLOWED]
     print("hex (post-strip):", hexes)
     if bad: fail(f"off-palette hex: {bad}")

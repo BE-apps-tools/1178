@@ -10,7 +10,8 @@
  *   POST /req/deliver-> ADMIN: log a delivered/pickup event on a line.
  *   POST /req/delete -> ADMIN: remove a tracker (close issue, drop req-tracker label).
  *   POST /req/complete -> ADMIN: manually mark a tracker complete (close, keep label).
- *   POST /req/trade  -> ADMIN: change a tracker's trade (title/body/label rewrite).
+ *   POST /req/trade  -> ADMIN: change a tracker's trade (title/body/label rewrite);
+ *                       also accepts requisitioner to backfill the originator.
  * Equipment Master inventory:
  *   POST /inventory  -> ADMIN: commit browser-parsed inventory JSON to main
  *                       (data/meta.json, data/sites.json, data/sites/<code>.json).
@@ -303,6 +304,7 @@ async function postSetTrade(req, env, h){
   const m = parseMarker(it.body);
   if (!m || m.type !== "req") return json({ error: "not a tracker" }, 400, h);
   m.trade = b.trade;
+  if (typeof b.requisitioner === "string") m.requisitioner = b.requisitioner;   // backfill originator from a re-parsed file
   const labels = (it.labels || []).map(l => (typeof l === "string" ? l : l.name)).filter(n => n && !n.startsWith("trade:"));
   labels.push(`trade:${b.trade}`);
   const pr = await fetch(`https://api.github.com/repos/${env.GH_REPO}/issues/${issue}`, {

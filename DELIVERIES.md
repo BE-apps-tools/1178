@@ -39,6 +39,10 @@ Live at the **Deliveries** card on the portal hub → `deliveries.html`.
      multiple trackers** ("Part 1 of N", "Part 2 of N", …) because a single
      GitHub Issue can't hold that many lines. They share the Req #, so re-imports
      still skip them. The preview shows "splits into N trackers" on those orders.
+   - **Backfill originator:** if you re-load a file after trackers were already
+     created (e.g. to add the Transaction Originator to older trackers), a
+     **Backfill originator on N tracked** button appears — click it to write the
+     file's originator onto those existing trackers without re-creating them.
 
 ## Log deliveries & pickups (updater)
 Each line captures two events, which happen at different times:

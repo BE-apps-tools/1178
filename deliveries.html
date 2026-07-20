@@ -241,6 +241,7 @@
           <div id="preview"></div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">
             <button class="btn" id="createBtn" disabled>Create trackers</button>
+            <button class="btn secondary" id="backfillBtn" style="display:none;"></button>
             <button class="btn secondary" id="cancelNew">Cancel</button>
           </div>
         </div>
@@ -277,7 +278,7 @@
 const WORKER_URL = "https://asset-portal.site-asset-manager.workers.dev";
 const TRADES = ["Civil","Electrical","Foundation","Collection","Install","Mechanical",
   "Commissioning","Substation","BESS","Safety","SM/PCC","Survey","Quality","TLine","Inventory","Decom","Other"];
-const STATE = { trackers:[], state:"open", admin:false, adminName:"", pendingOrders:null, existingReqs:null, page:1, cache:{open:null,closed:null} };
+const STATE = { trackers:[], state:"open", admin:false, adminName:"", pendingOrders:null, existingReqs:null, existingTrackers:null, page:1, cache:{open:null,closed:null} };
 const PAGE_SIZE = 100;
 const CREATE_PACE_MS = 1200;   // spacing between bulk creates (GitHub throttles rapid issue creation)
 const MAX_LINES = 200;         // GitHub caps an issue body at 65,536 chars; split big orders into ≤200-line trackers
@@ -433,16 +434,31 @@ function adminUnlock(){
 }
 
 /* ---------- new trackers (one per order, admin assigns a trade to each) ---------- */
-/* Existing Req #s (open + closed) — used to skip orders already tracked. */
-async function fetchExistingReqNumbers(){
-  const set=new Set();
+/* Existing trackers (open + closed) — used to skip orders already tracked and to
+   backfill newly-mapped fields (e.g. originator) onto trackers created earlier. */
+async function fetchExistingTrackers(){
+  const all=[];
   for(const st of ["open","closed"]){
     try{ const r=await fetch(wbase()+"/reqs?state="+st); if(!r.ok) continue;
-      const d=await r.json(); (d.trackers||[]).forEach(t=>set.add(String(t.reqNumber))); }catch(e){}
+      const d=await r.json(); (d.trackers||[]).forEach(t=>all.push(t)); }catch(e){}
   }
-  return set;
+  return all;
 }
 function orderExists(o){ return !!(STATE.existingReqs && STATE.existingReqs.has(String(o.reqNumber))); }
+/* Existing trackers that match a parsed order carrying an originator the tracker
+   is still missing — the "backfill" set. Returns [{issue, trade, requisitioner}]. */
+function backfillCandidates(){
+  if(!STATE.pendingOrders || !STATE.existingTrackers) return [];
+  const origByReq=new Map();
+  STATE.pendingOrders.forEach(o=>{ if(o.originator) origByReq.set(String(o.reqNumber), o.originator); });
+  const out=[];
+  STATE.existingTrackers.forEach(t=>{
+    const fileOrig=origByReq.get(String(t.reqNumber));
+    const cur=(t.marker && t.marker.requisitioner) || "";
+    if(fileOrig && fileOrig!==cur) out.push({ issue:t.issue, trade:t.trade, requisitioner:fileOrig });
+  });
+  return out;
+}
 function ordTradeSelect(idx, val){
   return '<select class="ordtrade" data-idx="'+idx+'"><option value="">Trade…</option>'+
     TRADES.map(t=>'<option value="'+t+'"'+(t===val?' selected':'')+'>'+t+'</option>').join("")+'</select>';
@@ -500,6 +516,8 @@ function updateCreateEnabled(){
   const n=plannedTrackerCount();
   $("#createBtn").disabled=!ready;
   $("#createBtn").textContent = nw.length? ("Create "+n+" tracker"+(n===1?"":"s")) : "No new orders";
+  const bf=$("#backfillBtn"), bc=backfillCandidates().length;
+  if(bf){ if(bc){ bf.style.display="inline-flex"; bf.textContent="Backfill originator on "+bc+" tracked"; } else bf.style.display="none"; }
 }
 const wbase = () => WORKER_URL.replace(/\/$/,"");
 function adminKey(){ return localStorage.getItem("bac_admin_key")||""; }
@@ -539,9 +557,10 @@ async function completeReq(issue){
   if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
   return await r.json();
 }
-async function setTradeReq(issue, trade){
+async function setTradeReq(issue, trade, requisitioner){
+  const payload={issue, trade}; if(requisitioner!=null) payload.requisitioner=requisitioner;
   const r=await fetch(wbase()+"/req/trade",{method:"POST",headers:{"Content-Type":"application/json","x-admin-key":adminKey()},
-    body:JSON.stringify({issue, trade})});
+    body:JSON.stringify(payload)});
   if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
   return await r.json();
 }
@@ -728,7 +747,9 @@ function bind(){
   $("#reqFile").addEventListener("change", async e=>{
     const f=e.target.files[0]; if(!f) return;
     try{ toast("Reading file…"); STATE.pendingOrders=await parseReqXlsx(f); renderPreview();
-      STATE.existingReqs=await fetchExistingReqNumbers(); renderPreview();   // flag already-tracked orders
+      STATE.existingTrackers=await fetchExistingTrackers();
+      STATE.existingReqs=new Set(STATE.existingTrackers.map(t=>String(t.reqNumber)));   // flag already-tracked orders
+      renderPreview();
       toast("Parsed "+STATE.pendingOrders.length+" order"+(STATE.pendingOrders.length===1?"":"s")); }
     catch(err){ STATE.pendingOrders=null; renderPreview(); banner("Could not read file: "+err.message); }
   });
@@ -798,6 +819,27 @@ function bind(){
     }
     render();
     toast("Created "+ok+" tracker"+(ok===1?"":"s")+(fail?(" · "+fail+" failed"):""));
+  });
+  $("#backfillBtn").addEventListener("click", async ()=>{
+    const cands=backfillCandidates(); if(!cands.length) return;
+    if(!window.confirm("Backfill the Transaction Originator onto "+cands.length+" already-tracked order"+(cands.length===1?"":"s")+" from this file?")) return;
+    $("#backfillBtn").disabled=true;
+    let ok=0, fail=0;
+    for(let i=0;i<cands.length;i++){
+      const c=cands[i]; banner("Backfilling "+(i+1)+" of "+cands.length+"…  ("+ok+" done"+(fail?", "+fail+" failed":"")+")");
+      let done=false;
+      for(let attempt=0; attempt<4 && !done; attempt++){
+        if(attempt>0) await sleep(3000*Math.pow(2,attempt-1));
+        try{ await setTradeReq(c.issue, c.trade, c.requisitioner); done=true; }catch(e){}
+      }
+      done ? ok++ : fail++;
+      if(i < cands.length-1) await sleep(CREATE_PACE_MS);
+    }
+    STATE.existingTrackers=await fetchExistingTrackers();
+    STATE.existingReqs=new Set(STATE.existingTrackers.map(t=>String(t.reqNumber)));
+    invalidateCache(); await loadTrackers(true);
+    $("#backfillBtn").disabled=false; renderPreview(); render();
+    banner(""); toast("Backfilled "+ok+" order"+(ok===1?"":"s")+(fail?(" · "+fail+" failed"):""));
   });
   $("#q").addEventListener("input", ()=>{ STATE.page=1; render(); });
   $("#fTrade").addEventListener("change", ()=>{ STATE.page=1; render(); });

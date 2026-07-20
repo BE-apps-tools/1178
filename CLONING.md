@@ -86,6 +86,22 @@ link can do them (requests are gated only by the public `SUBMIT_KEY` spam
 deterrent). Only the *write/admin* actions require an admin key. Share the Pages
 URL freely for read-only + request access.
 
+## Optional view-only access key
+
+If you'd rather not have the portal open to anyone with the link, an admin can
+require a **view key** from **Admin → Site access → Require a view key**. Once
+set, opening any viewer page (Dashboard, Assets, Deliveries, Guide) prompts for
+the key; admins on their own device are exempt. **Make public** turns it back
+off. The key is stored **hashed** in `data/access.json` and applied on the next
+Pages rebuild (~1 min).
+
+> **Important — this is a deterrent, not real confidentiality.** The repo and
+> Pages are public, so the underlying data (inventory JSON, delivery Issues,
+> `data/access.json`) stays readable on GitHub by anyone who goes looking. The
+> view key keeps casual link-holders out of the *UI*; it does not encrypt or
+> truly protect the data. For genuine access control, use a **private repo +
+> private Pages** (paid) or put **Cloudflare Access** in front of the site.
+
 ## Reminder: the repo is public
 
 Free GitHub Pages is publicly reachable, and so is the repo's data (trackers,

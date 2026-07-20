@@ -108,15 +108,12 @@
   .reqcard .card-head .rq-refresh:hover{background:var(--energy-blue);color:var(--white);}
   .reqrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:13px 20px;border-bottom:1px solid var(--bright-gray);font-size:13px;}
   .reqrow:last-child{border-bottom:none;}
-  .reqrow .rq-main{min-width:0;}
+  .reqrow .rq-main{flex:1;min-width:0;}
   .reqrow .rq-main strong{color:var(--dark-blue);}
   .badge{display:inline-block;background:var(--bright-gray);border:1px solid var(--light-gray);color:var(--dark-blue);
     border-radius:999px;font-size:10px;font-weight:bold;text-transform:uppercase;letter-spacing:0.04em;padding:3px 10px;white-space:nowrap;}
   .badge.issue{color:var(--medium-gray);}
   .muted{color:var(--medium-gray);font-size:12px;}
-  .rq-open{margin-left:auto;font-family:'Arial Black', Arial, sans-serif;text-transform:uppercase;font-size:10px;letter-spacing:0.04em;
-    color:var(--white);background:var(--dark-blue);border-radius:999px;padding:6px 12px;text-decoration:none;white-space:nowrap;}
-  .rq-open:hover{background:var(--energy-blue);}
   .rq-empty{padding:20px;color:var(--medium-gray);font-size:13px;}
 
   footer{max-width:1160px;width:100%;margin:0 auto;padding:0 32px 40px;color:var(--medium-gray);font-size:11px;}
@@ -227,7 +224,7 @@ async function loadOpenRequests(){
     reqs=arr.filter(it=>{ const L=labelsOf(it); return L.includes("request:reassign")||L.includes("request:issue"); })
       .map(it=>{ const L=labelsOf(it), m=parseMarker(it.body)||{};
         const type=L.includes("request:reassign")?"reassign":"issue";
-        return { number:it.number, url:it.html_url, type,
+        return { number:it.number, type,
           unit:m.unit||field(it.body,"Unit"), serial:m.serial||field(it.body,"Serial"),
           site:m.site||field(it.body,"Site"), requestedTrade:m.requestedTrade||field(it.body,"Requested trade"),
           current:field(it.body,"Current trade"), requester:field(it.body,"Requester") };
@@ -246,7 +243,7 @@ function renderOpenReqs(reqs){
     return '<div class="reqrow">'+badge+
       '<span class="rq-main"><strong>Unit '+esc(r.unit||"?")+'</strong> <span class="muted">SN '+esc(r.serial||"—")+'</span> &middot; '+change+'</span>'+
       (meta?'<span class="muted">'+meta+'</span>':'')+
-      '<a class="rq-open" href="'+esc(r.url)+'" target="_blank" rel="noopener">Open #'+esc(r.number)+'</a></div>';
+      '</div>';
   }).join("") : '<div class="rq-empty">No open change requests. Nothing to action right now.</div>';
   $("#openReqsWrap").innerHTML =
     '<div class="reqcard"><div class="card-head"><h3>Open change requests'+(reqs.length?(' ('+reqs.length+')'):'')+'</h3>'+

@@ -277,6 +277,7 @@ const TRADES = ["Civil","Electrical","Foundation","Collection","Install","Mechan
 const STATE = { trackers:[], state:"open", admin:false, adminName:"", pendingOrders:null, existingReqs:null, page:1, cache:{open:null,closed:null} };
 const PAGE_SIZE = 100;
 const CREATE_PACE_MS = 1200;   // spacing between bulk creates (GitHub throttles rapid issue creation)
+const MAX_LINES = 200;         // GitHub caps an issue body at 65,536 chars; split big orders into ≤200-line trackers
 
 const $ = s => document.querySelector(s);
 const sleep = ms => new Promise(r=>setTimeout(r, ms));
@@ -457,7 +458,7 @@ function renderPreview(){
     return '<div class="ordrow'+cls+'" data-row="'+i+'">'+
       '<div class="ord-head">'+
         '<span class="req">Req '+esc(o.reqNumber)+'</span>'+
-        '<span class="meta">'+o.lines.length+' line'+(o.lines.length===1?'':'s')+'</span>'+
+        '<span class="meta">'+o.lines.length+' line'+(o.lines.length===1?'':'s')+(orderChunks(o)>1?(' &middot; splits into '+orderChunks(o)+' trackers'):'')+'</span>'+
         '<button type="button" class="ord-view" data-view="'+i+'">View lines</button>'+
         controls+
       '</div>'+linesTbl+
@@ -470,11 +471,28 @@ function renderPreview(){
   updateCreateEnabled();
 }
 function newOrders(){ return (STATE.pendingOrders||[]).filter(o=>!orderExists(o) && !o.excluded); }
+function orderChunks(o){ return Math.max(1, Math.ceil((o.lines.length||0)/MAX_LINES)); }
+/* Split one order into ≤MAX_LINES tracker payloads (large orders exceed GitHub's
+   65,536-char issue body). Chunks share the Req # (so re-imports still skip it)
+   and carry a "Part i of N" label. */
+function chunkOrder(o){
+  const n=orderChunks(o);
+  if(n<=1) return [{ reqNumber:o.reqNumber, trade:o.trade, project:o.project||"", lines:o.lines }];
+  const out=[];
+  for(let i=0;i<n;i++){
+    out.push({ reqNumber:o.reqNumber, trade:o.trade,
+      project:(o.project?o.project+" · ":"")+"Part "+(i+1)+" of "+n,
+      lines:o.lines.slice(i*MAX_LINES,(i+1)*MAX_LINES) });
+  }
+  return out;
+}
+function plannedTrackerCount(){ return newOrders().reduce((s,o)=>s+orderChunks(o),0); }
 function updateCreateEnabled(){
   const nw=newOrders();
   const ready=nw.length && nw.every(o=>TRADES.includes(o.trade));
+  const n=plannedTrackerCount();
   $("#createBtn").disabled=!ready;
-  $("#createBtn").textContent = nw.length? ("Create "+nw.length+" tracker"+(nw.length===1?"":"s")) : "No new orders";
+  $("#createBtn").textContent = nw.length? ("Create "+n+" tracker"+(n===1?"":"s")) : "No new orders";
 }
 const wbase = () => WORKER_URL.replace(/\/$/,"");
 function adminKey(){ return localStorage.getItem("bac_admin_key")||""; }
@@ -717,30 +735,34 @@ function bind(){
     if(!orders.length){ toast("No new orders to create"); return; }
     if(!orders.every(o=>TRADES.includes(o.trade))){ toast("Assign a trade to every new order"); return; }
     $("#createBtn").disabled=true;
-    // GitHub throttles rapid issue creation, so pace the batch and retry throttled
-    // ones with backoff. Succeeded orders are marked tracked, so a re-run only
-    // attempts the rest (GitHub also caps content creation at ~500/hour).
-    let ok=0, fail=0; const created=[];
-    for(let i=0;i<orders.length;i++){
-      const o=orders[i]; banner("Creating "+(i+1)+" of "+orders.length+"…  ("+ok+" done"+(fail?", "+fail+" failed":"")+")");
+    // Large orders exceed GitHub's 65,536-char issue body, so split them into
+    // ≤MAX_LINES tracker "chunks". Pace the batch and retry throttled creates.
+    // An order is marked tracked only when ALL its chunks succeed, so a re-run
+    // resumes any that didn't (GitHub also caps content creation at ~500/hour).
+    const jobs=[]; orders.forEach(o=>chunkOrder(o).forEach(payload=>jobs.push({o, payload})));
+    let ok=0, fail=0; const created=[]; const orderFail=new Map();
+    for(let i=0;i<jobs.length;i++){
+      const {o,payload}=jobs[i];
+      banner("Creating "+(i+1)+" of "+jobs.length+"…  ("+ok+" done"+(fail?", "+fail+" failed":"")+")");
       let res=null;
       for(let attempt=0; attempt<4; attempt++){
         if(attempt>0) await sleep(3000*Math.pow(2,attempt-1));   // 3s, 6s, 12s backoff on throttle
-        res=await createTracker({ reqNumber:o.reqNumber, trade:o.trade, lines:o.lines });
+        res=await createTracker(payload);
         if(res.ok) break;
       }
-      if(res && res.ok){ ok++; if(res.tracker) created.push(res.tracker); if(STATE.existingReqs) STATE.existingReqs.add(String(o.reqNumber)); }
-      else fail++;
-      if(i < orders.length-1) await sleep(CREATE_PACE_MS);
+      if(res && res.ok){ ok++; if(res.tracker) created.push(res.tracker); }
+      else { fail++; orderFail.set(o,(orderFail.get(o)||0)+1); }
+      if(i < jobs.length-1) await sleep(CREATE_PACE_MS);
     }
+    orders.forEach(o=>{ if(!orderFail.get(o) && STATE.existingReqs) STATE.existingReqs.add(String(o.reqNumber)); });
     created.reverse().forEach(tr=>STATE.trackers.unshift(tr));
     invalidateCache();
     STATE.state="open"; STATE.page=1; $("#segActive").setAttribute("aria-selected","true"); $("#segDone").setAttribute("aria-selected","false");
     $("#createBtn").disabled=false;
     if(fail){
-      // keep the panel open; succeeded orders now show as "Already tracked · skipped"
+      // keep the panel open; fully-created orders now drop off as "already tracked"
       renderPreview();
-      banner("Created "+ok+", "+fail+" could not be created (GitHub throttles bulk issue creation and caps it at ~500/hour). Wait a minute or two, then click Create again to finish the rest — already-created orders are skipped.");
+      banner("Created "+ok+" tracker"+(ok===1?"":"s")+", "+fail+" could not be created. Wait a moment, then click Create again to retry the rest — already-created orders are skipped.");
     } else {
       banner(""); $("#newPanel").classList.remove("show"); resetNewPanel();
     }

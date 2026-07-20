@@ -35,6 +35,10 @@ Live at the **Deliveries** card on the portal hub → `deliveries.html`.
      also merged into a single tracker.)
    Then **Create N trackers** — each remaining order becomes its own tracker in
    **Active**.
+   - **Very large orders** (more than 200 lines) are automatically **split into
+     multiple trackers** ("Part 1 of N", "Part 2 of N", …) because a single
+     GitHub Issue can't hold that many lines. They share the Req #, so re-imports
+     still skip them. The preview shows "splits into N trackers" on those orders.
 
 ## Log deliveries & pickups (updater)
 Each line captures two events, which happen at different times:

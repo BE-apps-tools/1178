@@ -350,10 +350,14 @@ async function parseReqXlsx(file){
   for(const m of rels.matchAll(/<Relationship\s+[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g)) relMap[m[1]]=m[2];
   const rows=sheetRows(await zip.get(firstSheetPath(wb,relMap))||"", shared);
   if(!rows.length) throw new Error("The sheet is empty");
-  const hdr=rows[0].map(x=>String(x||"").trim());
-  const col=name=>hdr.indexOf(name);
+  // Match headers case-insensitively and whitespace-normalized, so exports that
+  // drift in capitalization or extra spaces (e.g. " Request date") still map.
+  const norm=s=>String(s||"").replace(/\s+/g," ").trim().toLowerCase();
+  const hdrRaw=rows[0].map(x=>String(x||"").trim());
+  const hdrNorm=hdrRaw.map(norm);
+  const col=name=>hdrNorm.indexOf(norm(name));
   const iOrder=col(REQ_COLS.order);
-  if(iOrder<0) throw new Error('Header "'+REQ_COLS.order+'" not found. Headers: '+(hdr.filter(Boolean).join(", ")||"(none)"));
+  if(iOrder<0) throw new Error('Header "'+REQ_COLS.order+'" not found. Headers: '+(hdrRaw.filter(Boolean).join(", ")||"(none)"));
   const iLine=col(REQ_COLS.line), iDesc=col(REQ_COLS.desc), iPart=col(REQ_COLS.part),
         iUom=col(REQ_COLS.uom), iReq=col(REQ_COLS.reqDate), iD2=col(REQ_COLS.desc2);
   const byOrder=new Map();

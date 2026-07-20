@@ -62,9 +62,11 @@ Each line captures two events, which happen at different times:
 
 ## Team view (everyone)
 - Open **Deliveries** (no unlock). Browse **Active** trackers; switch to
-  **Completed** for history. **Search** by Req #/trade/originator and filter by
-  **Trade** and by **Originator** (the Req's *Transaction Originator*, shown as
-  "By NAME" on each tracker). Expand any tracker to see, per line: Part #,
+  **Completed** for history. **Search** by Req #/trade/originator. Click
+  **Filters** (it shows a count when active) to open a compact filter bar —
+  filter by **Trade**, **Originator** (the Req's *Transaction Originator*, shown
+  as "By NAME"), and **Required** date (Overdue / Due within 7 / Due within 30) —
+  then **Clear filters** to reset. Expand any tracker to see, per line: Part #,
   description, **Required** date, **Delivered**, **Picked up**, **Picked up by**,
   and status.
 - **Change a trade (admin):** each tracker header has a **Trade** dropdown — pick

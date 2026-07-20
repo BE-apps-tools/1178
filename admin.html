@@ -87,6 +87,12 @@
     border:3px solid var(--dark-blue);border-bottom:none;border-radius:8px 8px 0 0;background:none;box-shadow:none;}
   .card.lock .chip::after{content:"";box-sizing:border-box;position:absolute;left:11px;top:19px;width:22px;height:16px;
     background:var(--dark-blue);border-radius:3px;box-shadow:none;}
+  .card.guide .chip::before{content:"";box-sizing:border-box;position:absolute;left:12px;top:11px;width:20px;height:18px;
+    border:3px solid var(--dark-blue);border-radius:3px;background:none;box-shadow:none;}
+  .card.guide .chip::after{content:"";position:absolute;left:21px;top:11px;width:2px;height:18px;background:var(--dark-blue);box-shadow:none;}
+  .card.reqs .chip::before{content:"";box-sizing:border-box;position:absolute;left:11px;top:13px;width:22px;height:16px;
+    border:3px solid var(--dark-blue);border-radius:3px;background:none;box-shadow:none;}
+  .card.reqs .chip::after{content:"";position:absolute;left:16px;top:18px;width:12px;height:2px;background:var(--dark-blue);box-shadow:0 4px 0 var(--dark-blue);}
   .card .eyebrow{font-size:10px;font-weight:bold;text-transform:uppercase;letter-spacing:0.10em;color:var(--medium-gray);margin-bottom:6px;}
   .card h3{font-size:19px;color:var(--dark-blue);margin-bottom:10px;}
   .card p{font-size:14px;color:var(--medium-gray);}
@@ -438,7 +444,7 @@ async function removeAdmin(name){
   }catch(e){ alert("Couldn't reach the service. Try again."); }
 }
 
-/* ---------- Open change requests (read-only, from the public GitHub Issues API) ---------- */
+/* ---------- Trade assignment requests (read-only, from the public GitHub Issues API) ---------- */
 const GH_ISSUES = "https://api.github.com/repos/be-apps-tools/1127/issues?state=open&per_page=100";
 function labelsOf(it){ return (it.labels||[]).map(l => typeof l==="string" ? l : (l&&l.name)||""); }
 function parseMarker(body){ const m=/```json\s*({[\s\S]*?})\s*```/.exec(body||""); if(!m) return null; try{ return JSON.parse(m[1]); }catch(e){ return null; } }
@@ -451,7 +457,7 @@ async function fetchOpenIssues(){
 }
 async function loadOpenRequests(){
   const w=$("#openReqsWrap");
-  w.innerHTML='<div class="reqcard"><div class="card-head"><h3>Open change requests</h3></div><div class="rq-empty">Loading…</div></div>';
+  w.innerHTML='<div class="reqcard"><div class="card-head"><h3>Trade assignment requests</h3></div><div class="rq-empty">Loading…</div></div>';
   let reqs;
   try{
     const arr=await fetchOpenIssues();
@@ -464,7 +470,7 @@ async function loadOpenRequests(){
           current:field(it.body,"Current trade"), requester:field(it.body,"Requester") };
       });
   }catch(e){
-    w.innerHTML='<div class="reqcard"><div class="card-head"><h3>Open change requests</h3><button class="rq-refresh" id="rqRefresh">Retry</button></div><div class="rq-empty">Could not load requests ('+esc(e.message)+'). GitHub may be rate-limiting — try again shortly.</div></div>';
+    w.innerHTML='<div class="reqcard"><div class="card-head"><h3>Trade assignment requests</h3><button class="rq-refresh" id="rqRefresh">Retry</button></div><div class="rq-empty">Could not load requests ('+esc(e.message)+'). GitHub may be rate-limiting — try again shortly.</div></div>';
     return;
   }
   renderOpenReqs(reqs);
@@ -480,7 +486,7 @@ function renderOpenReqs(reqs){
       '</div>';
   }).join("") : '<div class="rq-empty">No open change requests. Nothing to action right now.</div>';
   $("#openReqsWrap").innerHTML =
-    '<div class="reqcard"><div class="card-head"><h3>Open change requests'+(reqs.length?(' ('+reqs.length+')'):'')+'</h3>'+
+    '<div class="reqcard"><div class="card-head"><h3>Trade assignment requests'+(reqs.length?(' ('+reqs.length+')'):'')+'</h3>'+
       '<button class="rq-refresh" id="rqRefresh">Refresh</button></div>'+rows+'</div>';
 }
 
@@ -499,14 +505,24 @@ function renderAdmin(){
           '<div class="eyebrow">Procurement</div><h3>New tracker</h3>' +
           '<p>Create a delivery tracker from a Requisition .xlsx.</p></div>' +
         '<div class="foot"><a class="open-btn" href="deliveries.html?admin=new">Open tracker form</a></div></div>' +
+      '<div class="card guide"><div class="accent-top"></div>' +
+        '<div class="body"><div class="chip" aria-hidden="true"></div>' +
+          '<div class="eyebrow">Help</div><h3>Admin guide</h3>' +
+          '<p>How to use the admin tools — sign-in, team access, trackers, logging deliveries, corrections.</p></div>' +
+        '<div class="foot"><button class="open-btn" id="openGuideBtn">Open guide</button></div></div>' +
+      '<div class="card reqs"><div class="accent-top"></div>' +
+        '<div class="body"><div class="chip" aria-hidden="true"></div>' +
+          '<div class="eyebrow">Requests</div><h3>Trade assignment requests</h3>' +
+          '<p>Reassign / report requests submitted from the Assets page — review what needs actioning.</p></div>' +
+        '<div class="foot"><button class="open-btn" id="openReqsBtn">View requests</button></div></div>' +
       '<div class="card lock"><div class="accent-top"></div>' +
         '<div class="body"><div class="chip" aria-hidden="true"></div>' +
           '<div class="eyebrow">Session</div><h3>Signed in</h3>' +
           '<p>' + esc(adminName()||"admin") + ' — signed in on this device. Sign out to require the admin key again.</p></div>' +
         '<div class="foot"><button class="linkbtn" id="adminSignOut">Sign out</button></div></div>';
-    $("#guideSection").hidden=false;
+    $("#guideSection").hidden=true;                 // revealed via the Admin guide card
+    $("#openReqsWrap").innerHTML=""; $("#openReqsWrap").dataset.open="";   // loaded via the Requests card
     loadTeam();
-    loadOpenRequests();
   } else {
     who.classList.remove("show"); who.textContent="";
     $("#teamWrap").innerHTML="";
@@ -517,12 +533,25 @@ function renderAdmin(){
           '<div class="eyebrow">Restricted</div><h3>Admin sign in</h3>' +
           '<p>Enter the admin key to manage Equipment Master imports and delivery trackers.</p></div>' +
         '<div class="foot"><button class="open-btn" id="adminSignIn">Sign in</button></div></div>';
-    $("#openReqsWrap").innerHTML="";
+    $("#openReqsWrap").innerHTML=""; $("#openReqsWrap").dataset.open="";
   }
+}
+function toggleGuide(btn){
+  const gs=$("#guideSection"); gs.hidden=!gs.hidden;
+  btn.firstChild.nodeValue = gs.hidden ? "Open guide" : "Hide guide";
+  if(!gs.hidden) gs.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function toggleReqs(btn){
+  const w=$("#openReqsWrap");
+  if(w.dataset.open==="1"){ w.innerHTML=""; w.dataset.open=""; btn.firstChild.nodeValue="View requests"; }
+  else { loadOpenRequests(); w.dataset.open="1"; btn.firstChild.nodeValue="Hide requests";
+    setTimeout(()=>w.scrollIntoView({behavior:"smooth",block:"start"}), 80); }
 }
 $("#adminZone").addEventListener("click", e=>{
   if(e.target.closest("#adminSignIn")) adminSignIn();
   else if(e.target.closest("#adminSignOut")) adminSignOut();
+  else if(e.target.closest("#openGuideBtn")) toggleGuide(e.target.closest("#openGuideBtn"));
+  else if(e.target.closest("#openReqsBtn")) toggleReqs(e.target.closest("#openReqsBtn"));
 });
 $("#openReqsWrap").addEventListener("click", e=>{ if(e.target.closest("#rqRefresh")) loadOpenRequests(); });
 $("#teamWrap").addEventListener("click", e=>{

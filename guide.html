@@ -182,24 +182,10 @@
       <div class="intro">
         <h2>How to use the portal</h2>
         <div class="rule"></div>
-        <p>A quick, click-through guide to the Site Inventory Portal. Pick your role below — the steps expand as you go. Nothing here changes any data; it's safe to explore, and every <span class="k">Open</span> button jumps straight to the real screen.</p>
+        <p>A quick, click-through guide for everyone on the team. Open a link, find what you need, and — if something's wrong — ask for a change in a couple of taps. Your view is always read-only, so you can't break anything. Each step expands, and every <span class="k">Open</span> button jumps straight to the real screen.</p>
       </div>
 
-      <div class="aud" role="tablist" aria-label="Choose your guide">
-        <button id="btnTeam" class="on" role="tab" aria-selected="true">
-          <div class="a-k">For the team</div>
-          <div class="a-d">Everyone — find assets &amp; deliveries, ask for changes. No login.</div>
-        </button>
-        <button id="btnAdmin" role="tab" aria-selected="false">
-          <div class="a-k">For admins</div>
-          <div class="a-d">Signed-in updaters — create trackers, log deliveries, manage access.</div>
-        </button>
-      </div>
-
-      <!-- ============================== TEAM ============================== -->
-      <section id="trackTeam" class="track show" role="tabpanel" aria-label="Team guide">
-        <p class="track-lead">You don't need a key or a login. Open the link, find what you need, and — if something's wrong — ask for a change in a couple of taps. Your view is always read-only, so you can't break anything.</p>
-
+      <section aria-label="Team guide">
         <div class="legend">
           <h3>Delivery status at a glance</h3>
           <div class="row">
@@ -257,102 +243,8 @@
             <a class="go" href="deliveries.html">Open Deliveries</a>
           </div>
         </details>
-      </section>
 
-      <!-- ============================== ADMIN ============================== -->
-      <section id="trackAdmin" class="track" role="tabpanel" aria-label="Admin guide">
-        <p class="track-lead">Admins do everything the team can, plus create and update trackers, publish inventory, and manage who else has access. All of it is gated by your <strong>admin key</strong>.</p>
-
-        <details class="step" open>
-          <summary class="step-head"><span class="step-num">1</span><span class="step-t">Sign in</span><span class="step-chev"></span></summary>
-          <div class="step-body">
-            <p>Open <strong>Admin</strong> → <strong>Sign in</strong>, enter your name and your <strong>admin key</strong>. There are two kinds of key, and both work the same way:</p>
-            <ul>
-              <li><strong>Master key</strong> — the account owner's key (set once in Cloudflare). Always works.</li>
-              <li><strong>Team key</strong> — a personal key an admin generated for you under <em>Team access</em> (step 2).</li>
-            </ul>
-            <div class="note">Your sign-in is remembered <strong>on this device</strong> across the Assets, Deliveries and Admin tabs — you won't be asked again each visit. <span class="k">Sign out</span> to require the key again.</div>
-            <a class="go" href="admin.html">Open Admin</a>
-          </div>
-        </details>
-
-        <details class="step">
-          <summary class="step-head"><span class="step-num">2</span><span class="step-t">Manage team access (add / revoke admins)</span><span class="step-chev"></span></summary>
-          <div class="step-body">
-            <p>On <strong>Admin</strong>, the <strong>Team access</strong> card lists everyone who can sign in.</p>
-            <ul>
-              <li><span class="k">+ Add admin</span> → enter a name → the portal generates a <strong>one-time key</strong> and shows it once. Copy it and give it to that person; they sign in with it (step 1).</li>
-              <li><span class="k">Remove</span> next to a name revokes their access <strong>immediately</strong>.</li>
-            </ul>
-            <div class="note">You never touch Cloudflare for this — the list lives in the repo, and keys are stored <strong>hashed</strong> (never in plain text). The <strong>Master key</strong> row is always there and can't be removed here.</div>
-            <a class="go" href="admin.html">Open Admin</a>
-          </div>
-        </details>
-
-        <details class="step">
-          <summary class="step-head"><span class="step-num">3</span><span class="step-t">Publish inventory (Equipment Master)</span><span class="step-chev"></span></summary>
-          <div class="step-body">
-            <p>Under <strong>Admin → Equipment Master</strong> (or Assets → <em>Import Equipment Master</em>), upload the latest <span class="k">.xlsx</span> export. It's parsed <strong>in your browser</strong> — the file is never uploaded, only the built inventory JSON is committed.</p>
-            <p>Check the preview counts, then <strong>Publish</strong>. The site refreshes for everyone in a minute or two.</p>
-            <a class="go" href="inventory.html?admin=import">Open importer</a>
-          </div>
-        </details>
-
-        <details class="step">
-          <summary class="step-head"><span class="step-num">4</span><span class="step-t">Create delivery trackers from a Req</span><span class="step-chev"></span></summary>
-          <div class="step-body">
-            <p>Open <strong>Deliveries → New tracker</strong> and drop the Requisition <span class="k">.xlsx</span>. It's read in your browser by exact column header (order can vary) and grouped into <strong>one tracker per Order Number</strong>.</p>
-            <ul>
-              <li><strong>Assign a Trade</strong> to each order (or <em>Set trade for all</em>). If unsure, pick <span class="k">Other</span> and fix it later (step 6).</li>
-              <li><strong>Exclude</strong> any old/completed order you don't want tracked.</li>
-              <li>Orders already tracked are <strong>auto-hidden and skipped</strong>, so you never add one twice.</li>
-              <li>Very large orders (200+ lines) are <strong>split into "Part 1 of N"</strong> trackers automatically.</li>
-              <li>Re-drop a file later and use <span class="k">Backfill originator</span> to add the Transaction Originator onto trackers created before.</li>
-            </ul>
-            <p>Then <strong>Create N trackers</strong> — creation is paced and resumable, so large imports (hundreds of orders) finish reliably.</p>
-            <a class="go" href="deliveries.html?admin=new">Open tracker form</a>
-          </div>
-        </details>
-
-        <details class="step">
-          <summary class="step-head"><span class="step-num">5</span><span class="step-t">Log deliveries &amp; pickups</span><span class="step-chev"></span></summary>
-          <div class="step-body">
-            <p>Expand a tracker. Each line has three inline controls in the log cell:</p>
-            <ul>
-              <li><strong>Expected</strong> — the target qty. It <strong>prefills from the file</strong> when the export includes <em>Quantity To Receive</em>; otherwise type it and click <span class="k">Set</span>. The line then shows <strong>Pending = Expected − Delivered</strong>.</li>
-              <li><strong>Deliver</strong> — when material arrives, enter the qty delivered and click <span class="k">Log</span>.</li>
-              <li><strong>Pickup</strong> — when the team takes material, enter the qty and the <strong>pickup person's name</strong>, then <span class="k">Log</span>.</li>
-            </ul>
-            <p>Status moves <span class="tag ns">Not started</span> → <span class="tag on">On site</span> → <span class="tag part">Partial pickup</span> → <span class="tag done">Picked up</span>. When every line is fully picked up, the tracker <strong>auto-closes to Completed</strong>. Your name and the date are recorded on each entry.</p>
-            <a class="go" href="deliveries.html">Open Deliveries</a>
-          </div>
-        </details>
-
-        <details class="step">
-          <summary class="step-head"><span class="step-num">6</span><span class="step-t">Corrections &amp; housekeeping</span><span class="step-chev"></span></summary>
-          <div class="step-body">
-            <ul>
-              <li><strong>Fix a mistyped pickup qty:</strong> under <em>Picked up by</em>, click <span class="k">Edit</span> next to the entry, correct the number, and <span class="k">Save</span> (it asks you to confirm).</li>
-              <li><strong>Logged too much/little:</strong> log an adjusting delivery/pickup (a negative qty subtracts).</li>
-              <li><strong>Change a trade after creation:</strong> use the <strong>Trade</strong> dropdown in the tracker header.</li>
-              <li><strong>Mark complete:</strong> if the export omits already-handled lines, click <span class="k">Mark complete</span> on the header to move it to Completed.</li>
-              <li><strong>Delete a tracker:</strong> expand it and click <span class="k">Delete order</span> (it leaves the app; the GitHub Issue is closed as a record).</li>
-              <li><strong>Purge legacy:</strong> old-format trackers show a <span class="k">Purge N legacy</span> button on the Active toolbar.</li>
-            </ul>
-            <a class="go" href="deliveries.html">Open Deliveries</a>
-          </div>
-        </details>
-
-        <details class="step">
-          <summary class="step-head"><span class="step-num">7</span><span class="step-t">Good to know</span><span class="step-chev"></span></summary>
-          <div class="step-body">
-            <div class="note warn"><strong>The repo is public.</strong> Trackers hold material descriptions, quantities, Req #, project and ship-to — <strong>never pricing or costs</strong>. Don't put anything confidential in a Req line.</div>
-            <ul>
-              <li><strong>List freshness:</strong> a new or closed tracker can take a few seconds to appear for <em>other</em> viewers (GitHub's index) — you see your own changes instantly.</li>
-              <li><strong>Setting up a separate project?</strong> The whole portal can be cloned for another environment with its own data and admins — see <span class="k">CLONING.md</span> in the repo.</li>
-            </ul>
-          </div>
-        </details>
+        <div class="note">Are you an admin? The guide for creating trackers, logging deliveries and managing access lives on the <a href="admin.html">Admin</a> tab once you sign in.</div>
       </section>
 
     </main>
@@ -361,24 +253,6 @@
   </div>
 </div>
 
-<script>
-"use strict";
-(function(){
-  var btnTeam=document.getElementById("btnTeam"), btnAdmin=document.getElementById("btnAdmin");
-  var trackTeam=document.getElementById("trackTeam"), trackAdmin=document.getElementById("trackAdmin");
-  function show(which){
-    var admin = which==="admin";
-    trackAdmin.classList.toggle("show", admin);
-    trackTeam.classList.toggle("show", !admin);
-    btnAdmin.classList.toggle("on", admin); btnAdmin.setAttribute("aria-selected", admin?"true":"false");
-    btnTeam.classList.toggle("on", !admin); btnTeam.setAttribute("aria-selected", admin?"false":"true");
-    if(("#"+which)!==location.hash){ try{ history.replaceState(null,"","#"+which); }catch(e){ location.hash=which; } }
-  }
-  btnTeam.addEventListener("click", function(){ show("team"); });
-  btnAdmin.addEventListener("click", function(){ show("admin"); });
-  show(location.hash.replace("#","")==="admin" ? "admin" : "team");
-})();
-</script>
 
 </body>
 </html>

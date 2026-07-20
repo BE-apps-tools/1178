@@ -74,7 +74,9 @@
   #filtersBtn.on{background:var(--dark-blue);color:var(--white);border-color:var(--dark-blue);}
   .filterbar{display:none;flex-wrap:wrap;gap:10px;align-items:center;margin:-4px 0 16px;padding:12px 14px;background:var(--white);border:1px solid var(--light-gray);border-radius:var(--r-sm);box-shadow:var(--shadow);}
   .filterbar.show{display:flex;}
-  .filterbar select{min-width:160px;width:auto;flex:0 1 auto;}
+  .filterbar .fgrp{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;}
+  .filterbar select{min-width:150px;width:auto;flex:0 1 auto;}
+  .filterbar input[type=date]{width:auto;flex:0 1 auto;font-size:14px;padding:9px 11px;}
   .filterbar .flbl{font-size:10px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;color:var(--medium-gray);}
   .linkbtn{background:none;border:none;color:var(--energy-blue);font-family:'Arial Black', Arial, sans-serif;text-transform:uppercase;font-size:11px;letter-spacing:0.04em;cursor:pointer;padding:8px 6px;margin-left:auto;}
   .linkbtn:hover{color:var(--dark-blue);}
@@ -264,10 +266,12 @@
         <button class="btn small secondary" id="purgeLegacy" style="display:none;"></button>
       </div>
       <div class="filterbar" id="filterbar">
-        <span class="flbl">Trade</span><select id="fTrade"><option value="">All trades</option></select>
-        <span class="flbl">Originator</span><select id="fOriginator"><option value="">All originators</option></select>
-        <span class="flbl">Required</span>
-        <select id="fDate"><option value="">Any date</option><option value="overdue">Overdue</option><option value="d7">Due within 7 days</option><option value="d30">Due within 30 days</option></select>
+        <span class="fgrp"><span class="flbl">Trade</span><select id="fTrade"><option value="">All trades</option></select></span>
+        <span class="fgrp"><span class="flbl">Originator</span><select id="fOriginator"><option value="">All originators</option></select></span>
+        <span class="fgrp"><span class="flbl">Required</span><select id="fDate"><option value="">Any date</option><option value="overdue">Overdue</option><option value="today">Due today</option><option value="d7">Due within 7 days</option><option value="d30">Due within 30 days</option></select></span>
+        <button type="button" class="btn small secondary" id="todayBtn">Today</button>
+        <span class="fgrp"><span class="flbl">From</span><input type="date" id="fFrom" aria-label="Required date from"></span>
+        <span class="fgrp"><span class="flbl">To</span><input type="date" id="fTo" aria-label="Required date to"></span>
         <button type="button" class="linkbtn" id="clearFilters">Clear filters</button>
       </div>
 
@@ -620,18 +624,27 @@ function animateProgress(root){
 /* ---------- render trackers ---------- */
 function trackerOriginator(t){ return (t.marker && t.marker.requisitioner) || ""; }
 function trackerDueWithin(t, days){ return ((t.marker&&t.marker.lines)||[]).some(l=>{ const du=daysUntil(l.requiredDate); return du!==null && du>=0 && du<=days && lineDelivered(l)<=0; }); }
+/* Any line whose required date falls in the inclusive [from,to] range (ISO strings). */
+function trackerInDateRange(t, from, to){ return ((t.marker&&t.marker.lines)||[]).some(l=>{ const d=l.requiredDate; if(!d) return false; if(from && d<from) return false; if(to && d>to) return false; return true; }); }
+function todayISO(){ const n=new Date(), p=x=>String(x).padStart(2,"0"); return n.getFullYear()+"-"+p(n.getMonth()+1)+"-"+p(n.getDate()); }
 function viewTrackers(){
   const q=$("#q").value.trim().toLowerCase(), tf=$("#fTrade").value, of=$("#fOriginator").value, df=$("#fDate").value;
+  const from=$("#fFrom").value, to=$("#fTo").value;
   let v=STATE.trackers.slice();
   if(tf) v=v.filter(t=>t.trade===tf);
   if(of) v=v.filter(t=>trackerOriginator(t)===of);
   if(df==="overdue") v=v.filter(trackerOverdue);
+  else if(df==="today") v=v.filter(t=>trackerDueWithin(t,0));
   else if(df==="d7") v=v.filter(t=>trackerDueWithin(t,7));
   else if(df==="d30") v=v.filter(t=>trackerDueWithin(t,30));
+  if(from||to) v=v.filter(t=>trackerInDateRange(t, from, to));
   if(q) v=v.filter(t=>[t.reqNumber,t.project,t.description,t.trade,trackerOriginator(t)].some(x=>String(x||"").toLowerCase().includes(q)));
   return v;
 }
-function activeFilterCount(){ return [$("#fTrade").value,$("#fOriginator").value,$("#fDate").value].filter(Boolean).length; }
+function activeFilterCount(){
+  const range=($("#fFrom").value||$("#fTo").value)?1:0;
+  return [$("#fTrade").value,$("#fOriginator").value,$("#fDate").value].filter(Boolean).length + range;
+}
 function updateFiltersBtn(){
   const btn=$("#filtersBtn"); if(!btn) return;
   const n=activeFilterCount();
@@ -870,12 +883,18 @@ function bind(){
   $("#fTrade").addEventListener("change", ()=>{ STATE.page=1; render(); });
   $("#fOriginator").addEventListener("change", ()=>{ STATE.page=1; render(); });
   $("#fDate").addEventListener("change", ()=>{ STATE.page=1; render(); });
+  $("#fFrom").addEventListener("change", ()=>{ STATE.page=1; render(); });
+  $("#fTo").addEventListener("change", ()=>{ STATE.page=1; render(); });
+  $("#todayBtn").addEventListener("click", ()=>{
+    const d=todayISO(); $("#fFrom").value=d; $("#fTo").value=d; $("#fDate").value="";   // exact today via range
+    STATE.page=1; render();
+  });
   $("#filtersBtn").addEventListener("click", ()=>{
     const fb=$("#filterbar"), open=fb.classList.toggle("show");
     $("#filtersBtn").setAttribute("aria-expanded", open?"true":"false");
   });
   $("#clearFilters").addEventListener("click", ()=>{
-    $("#fTrade").value=""; $("#fOriginator").value=""; $("#fDate").value="";
+    $("#fTrade").value=""; $("#fOriginator").value=""; $("#fDate").value=""; $("#fFrom").value=""; $("#fTo").value="";
     STATE.page=1; render();
   });
   $("#segActive").addEventListener("click", async ()=>{ STATE.state="open"; STATE.page=1; $("#segActive").setAttribute("aria-selected","true"); $("#segDone").setAttribute("aria-selected","false"); await loadTrackers(); render(); });

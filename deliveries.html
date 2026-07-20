@@ -276,8 +276,10 @@ const TRADES = ["Civil","Electrical","Foundation","Collection","Install","Mechan
   "Commissioning","Substation","BESS","Safety","SM/PCC","Survey","Quality","TLine","Inventory","Decom","Other"];
 const STATE = { trackers:[], state:"open", admin:false, adminName:"", pendingOrders:null, existingReqs:null, page:1, cache:{open:null,closed:null} };
 const PAGE_SIZE = 100;
+const CREATE_PACE_MS = 1200;   // spacing between bulk creates (GitHub throttles rapid issue creation)
 
 const $ = s => document.querySelector(s);
+const sleep = ms => new Promise(r=>setTimeout(r, ms));
 const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 let toastT=null;
 function toast(m){ const t=$("#toast"); t.textContent=m; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),3000); }
@@ -716,16 +718,34 @@ function bind(){
     if(!orders.length){ toast("No new orders to create"); return; }
     if(!orders.every(o=>TRADES.includes(o.trade))){ toast("Assign a trade to every new order"); return; }
     $("#createBtn").disabled=true;
+    // GitHub throttles rapid issue creation, so pace the batch and retry throttled
+    // ones with backoff. Succeeded orders are marked tracked, so a re-run only
+    // attempts the rest (GitHub also caps content creation at ~500/hour).
     let ok=0, fail=0; const created=[];
     for(let i=0;i<orders.length;i++){
-      const o=orders[i]; toast("Creating "+(i+1)+"/"+orders.length+"…");
-      const res=await createTracker({ reqNumber:o.reqNumber, trade:o.trade, lines:o.lines });
-      if(res.ok){ ok++; if(res.tracker) created.push(res.tracker); if(STATE.existingReqs) STATE.existingReqs.add(String(o.reqNumber)); } else fail++;
+      const o=orders[i]; banner("Creating "+(i+1)+" of "+orders.length+"…  ("+ok+" done"+(fail?", "+fail+" failed":"")+")");
+      let res=null;
+      for(let attempt=0; attempt<4; attempt++){
+        if(attempt>0) await sleep(3000*Math.pow(2,attempt-1));   // 3s, 6s, 12s backoff on throttle
+        res=await createTracker({ reqNumber:o.reqNumber, trade:o.trade, lines:o.lines });
+        if(res.ok) break;
+      }
+      if(res && res.ok){ ok++; if(res.tracker) created.push(res.tracker); if(STATE.existingReqs) STATE.existingReqs.add(String(o.reqNumber)); }
+      else fail++;
+      if(i < orders.length-1) await sleep(CREATE_PACE_MS);
     }
-    STATE.state="open"; STATE.page=1; $("#segActive").setAttribute("aria-selected","true"); $("#segDone").setAttribute("aria-selected","false");
     created.reverse().forEach(tr=>STATE.trackers.unshift(tr));
-    invalidateCache(); STATE.cache.open=STATE.trackers;
-    $("#newPanel").classList.remove("show"); resetNewPanel(); render();
+    invalidateCache();
+    STATE.state="open"; STATE.page=1; $("#segActive").setAttribute("aria-selected","true"); $("#segDone").setAttribute("aria-selected","false");
+    $("#createBtn").disabled=false;
+    if(fail){
+      // keep the panel open; succeeded orders now show as "Already tracked · skipped"
+      renderPreview();
+      banner("Created "+ok+", "+fail+" could not be created (GitHub throttles bulk issue creation and caps it at ~500/hour). Wait a minute or two, then click Create again to finish the rest — already-created orders are skipped.");
+    } else {
+      banner(""); $("#newPanel").classList.remove("show"); resetNewPanel();
+    }
+    render();
     toast("Created "+ok+" tracker"+(ok===1?"":"s")+(fail?(" · "+fail+" failed"):""));
   });
   $("#q").addEventListener("input", ()=>{ STATE.page=1; render(); });

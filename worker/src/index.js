@@ -9,6 +9,7 @@
  *   GET  /reqs       -> list trackers (?state=open|closed), cached ~60s.
  *   POST /req/deliver-> ADMIN: log a delivered/pickup event on a line.
  *   POST /req/delete -> ADMIN: remove a tracker (close issue, drop req-tracker label).
+ *   POST /req/complete -> ADMIN: manually mark a tracker complete (close, keep label).
  * Equipment Master inventory:
  *   POST /inventory  -> ADMIN: commit browser-parsed inventory JSON to main
  *                       (data/meta.json, data/sites.json, data/sites/<code>.json).
@@ -56,6 +57,8 @@ export default {
       return postDeliver(req, env, h);
     } else if (path === "/req/delete" && req.method === "POST"){
       return postDeleteReq(req, env, h);
+    } else if (path === "/req/complete" && req.method === "POST"){
+      return postCompleteReq(req, env, h);
     } else if (path === "/inventory" && req.method === "POST"){
       return postInventory(req, env, h);
     } else if (path === "/health" && req.method === "GET"){
@@ -264,6 +267,23 @@ async function postDeleteReq(req, env, h){
   });
   if (!pr.ok) { const t = await pr.text(); return json({ error: "github " + pr.status, detail: t.slice(0, 300) }, 502, h); }
   return json({ ok: true, deleted: issue }, 200, h);
+}
+
+/* ADMIN: manually mark a tracker complete — close the issue (keeping the
+ * req-tracker label so it shows under Completed) even if not every line has
+ * been picked up. Used when the Req export omits some already-handled lines. */
+async function postCompleteReq(req, env, h){
+  if (!requireAdmin(req, env)) return json({ error: "admin only" }, 401, h);
+  let b; try { b = await req.json(); } catch { return json({ error: "bad json" }, 400, h); }
+  const issue = parseInt(b.issue, 10);
+  if (!issue) return json({ error: "missing issue" }, 400, h);
+  const pr = await fetch(`https://api.github.com/repos/${env.GH_REPO}/issues/${issue}`, {
+    method: "PATCH", headers: { ...ghHeaders(env), "Content-Type": "application/json" },
+    body: JSON.stringify({ state: "closed", state_reason: "completed" }),
+  });
+  if (!pr.ok) { const t = await pr.text(); return json({ error: "github " + pr.status, detail: t.slice(0, 300) }, 502, h); }
+  const updated = await pr.json();
+  return json({ ok: true, complete: true, tracker: computeTracker(updated) }, 200, h);
 }
 
 /* ============================ inventory publish (Equipment Master import) ============================ */

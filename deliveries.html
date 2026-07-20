@@ -122,6 +122,9 @@
   .rd-tag{display:inline-block;background:#EC9522;color:var(--white);font-size:8px;font-weight:bold;text-transform:uppercase;letter-spacing:0.04em;padding:2px 6px;border-radius:999px;vertical-align:middle;margin-left:4px;}
   .rd-tag.soon{background:var(--energy-blue);}
   .badge.over{background:#EC9522;color:var(--white);border-color:#EC9522;}
+  .badge.done{background:#C9DB30;color:var(--dark-blue);border-color:#C9DB30;}
+  .trk.done{border-left-color:#C9DB30;}
+  .trk.done .top{background:#F2F2F2;}
 
   /* New-tracker order preview */
   .ordsum{font-size:12px;color:var(--medium-gray);font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;margin:4px 0 10px;}
@@ -485,6 +488,12 @@ async function deleteReq(issue){
   if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
   return await r.json();
 }
+async function completeReq(issue){
+  const r=await fetch(wbase()+"/req/complete",{method:"POST",headers:{"Content-Type":"application/json","x-admin-key":adminKey()},
+    body:JSON.stringify({issue})});
+  if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||("HTTP "+r.status)); }
+  return await r.json();
+}
 function lineDelivered(l){ return (l.deliveries||[]).reduce((s,d)=>s+(Number(d.qty)||0),0); }
 function linePickedUp(l){ return (l.pickups||[]).reduce((s,p)=>s+(Number(p.qty)||0),0); }
 function lineStatus(delivered, picked){
@@ -610,11 +619,14 @@ function renderTracker(t){
     return '<tr><td>'+esc(l.line)+'</td><td>'+esc(l.part||"")+'</td><td>'+esc(l.desc)+'</td><td>'+esc(l.uom)+'</td>'+reqCell+'<td>'+esc(d)+'</td><td>'+esc(p)+meter+'</td><td class="meta pickedby">'+pb+'</td><td class="'+statusClass(st)+'">'+st+'</td>'+admin+'</tr>';
   }).join("");
   const adminHead = STATE.admin && STATE.state==="open" ? '<th>Log delivery / pickup</th>' : '';
-  const overBadge = trackerOverdue(t) ? ' <span class="badge over">Overdue</span>' : '';
-  return '<div class="trk" data-issue="'+t.issue+'">'+
-    '<div class="top" data-toggle="'+t.issue+'"><span class="req">Req '+esc(t.reqNumber)+'</span> <span class="badge">'+esc(t.trade)+'</span>'+overBadge+' '+
+  const isDone = STATE.state==="closed";
+  const overBadge = (!isDone && trackerOverdue(t)) ? ' <span class="badge over">Overdue</span>' : '';
+  const doneBadge = isDone ? ' <span class="badge done">Completed</span>' : '';
+  const completeBtn = (STATE.admin && !isDone) ? '<button class="btn small secondary" data-complete="'+t.issue+'">Mark complete</button>' : '';
+  return '<div class="trk'+(isDone?' done':'')+'" data-issue="'+t.issue+'">'+
+    '<div class="top" data-toggle="'+t.issue+'"><span class="req">Req '+esc(t.reqNumber)+'</span> <span class="badge">'+esc(t.trade)+'</span>'+overBadge+doneBadge+' '+
       (t.project?'<span class="meta">'+esc(t.project)+'</span>':'')+
-      '<span class="prog"><span class="lines">'+t.linesComplete+'/'+t.linesTotal+' picked up</span>'+ringSvg(pct)+'</span></div>'+
+      '<span class="prog"><span class="lines">'+t.linesComplete+'/'+t.linesTotal+' picked up</span>'+ringSvg(pct)+'</span>'+completeBtn+'</div>'+
     '<div class="detail"><div class="table-scroll"><table><thead><tr><th>Line</th><th>Part #</th><th>Description</th><th>UoM</th><th>Required</th><th>Delivered</th><th>Picked up</th><th>Picked up by</th><th>Status</th>'+adminHead+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
       '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">'+
       '<button class="btn small secondary" data-print="'+t.issue+'">Print sheet</button>'+
@@ -698,6 +710,16 @@ function bind(){
     toast("Purged "+ok+(fail?(" · "+fail+" failed"):""));
   });
   $("#list").addEventListener("click", async e=>{
+    const cmp=e.target.closest("[data-complete]");
+    if(cmp){
+      const issue=parseInt(cmp.getAttribute("data-complete"),10);
+      if(!window.confirm("Mark this order complete? It moves to the Completed tab.")) return;
+      try{ toast("Completing…"); await completeReq(issue);
+        const idx=STATE.trackers.findIndex(t=>t.issue===issue); if(idx>=0) STATE.trackers.splice(idx,1);
+        toast("Order marked complete"); render();
+      }catch(err){ toast("Failed: "+err.message); }
+      return;
+    }
     const del=e.target.closest("[data-delete]");
     if(del){
       const issue=parseInt(del.getAttribute("data-delete"),10);

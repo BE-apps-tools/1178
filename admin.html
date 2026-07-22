@@ -536,6 +536,10 @@ async function fetchOpenIssues(){
   const a=await r.json();
   return Array.isArray(a)?a.filter(it=>!it.pull_request):[];
 }
+function detailField(body){
+  const m=/\*\*Detail:\*\*[ \t]*([\s\S]*?)[ \t]*(?=\n\*\*[^*\n]+:\*\*|\n```|$)/.exec(body||"");
+  return m ? m[1].trim() : "";
+}
 async function loadOpenRequests(){
   const w=$("#openReqsWrap");
   w.innerHTML='<div class="reqcard"><div class="card-head"><h3>Trade assignment requests</h3></div><div class="rq-empty">Loading…</div></div>';
@@ -549,7 +553,7 @@ async function loadOpenRequests(){
           unit:m.unit||field(it.body,"Unit"), serial:m.serial||field(it.body,"Serial"),
           site:m.site||field(it.body,"Site"), requestedTrade:m.requestedTrade||field(it.body,"Requested trade"),
           current:field(it.body,"Current trade"), requester:field(it.body,"Requester"),
-          description:field(it.body,"Description"), detail:field(it.body,"Detail"), created:it.created_at };
+          description:field(it.body,"Description"), detail:detailField(it.body), created:it.created_at };
       });
   }catch(e){
     w.innerHTML='<div class="reqcard"><div class="card-head"><h3>Trade assignment requests</h3><button class="rq-refresh" id="rqRefresh">Retry</button></div><div class="rq-empty">Could not load requests ('+esc(e.message)+'). GitHub may be rate-limiting — try again shortly.</div></div>';
@@ -564,9 +568,9 @@ function renderOpenReqs(reqs){
     const badge = isRe ? '<span class="badge">Reassign</span>' : '<span class="badge issue">Issue</span>';
     const change = isRe ? (esc(r.current||"(none)")+' &rarr; '+esc(r.requestedTrade||"?")) : 'Reported issue';
     const meta = [r.site, r.requester].filter(Boolean).map(esc).join(' &middot; ');
-    const submitted = r.created ? esc(r.created.slice(0,10)) : "—";
+    const submitted = r.created ? esc(String(r.created).slice(0,10)) : "—";
     const note = r.detail
-      ? '<div class="req-note"><span class="rf-l">Note from requester</span>'+esc(r.detail)+'</div>' : "";
+      ? '<div class="req-note"><span class="rf-l">Note from requester</span>'+esc(r.detail).replace(/\n/g,"<br>")+'</div>' : "";
     const facts =
       fact("Requester", esc(r.requester||"—")) +
       fact("Site", esc(r.site||"—")) +
